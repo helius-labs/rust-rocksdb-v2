@@ -14,8 +14,11 @@
 #include <memory>
 #include <string>
 
+#include "rocksdb/iterator.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
+#include "rocksdb/slice.h"
+#include "rocksdb/sst_file_reader.h"
 #include "rocksdb/table.h"
 
 using ROCKSDB_NAMESPACE::BackgroundErrorRecoveryInfo;
@@ -32,6 +35,9 @@ using ROCKSDB_NAMESPACE::Status;
 using ROCKSDB_NAMESPACE::SubcompactionJobInfo;
 using ROCKSDB_NAMESPACE::WriteStallInfo;
 using ROCKSDB_NAMESPACE::MemTableInfo;
+using ROCKSDB_NAMESPACE::Iterator;
+using ROCKSDB_NAMESPACE::Slice;
+using ROCKSDB_NAMESPACE::SstFileReader;
 
 struct rust_rocksdb_status_t {
   Status* rep;
@@ -349,4 +355,108 @@ extern "C" void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
 extern "C" double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
     rocksdb_compactoptions_t* opt) {
   return reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff;
+}
+
+// -----------------------------------------------------------------------------
+// SstFileReader
+//
+// `rocksdb_options_t` / `rocksdb_readoptions_t` wrap their C++ counterparts as
+// the first struct member, so a `reinterpret_cast` recovers the C++ object (the
+// same technique upstream `c.cc` uses internally). The reader and iterator get
+// their own opaque handle structs, owned entirely by this translation unit.
+// -----------------------------------------------------------------------------
+
+struct rust_rocksdb_sst_file_reader_t {
+  SstFileReader* rep;
+};
+struct rust_rocksdb_sst_file_reader_iterator_t {
+  Iterator* rep;
+};
+
+extern "C" rust_rocksdb_sst_file_reader_t* rust_rocksdb_sst_file_reader_create(
+    const rocksdb_options_t* options) {
+  auto* reader = new rust_rocksdb_sst_file_reader_t;
+  reader->rep = new SstFileReader(*reinterpret_cast<const Options*>(options));
+  return reader;
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_open(
+    rust_rocksdb_sst_file_reader_t* reader, const char* name, char** errptr) {
+  RustSaveError(errptr, reader->rep->Open(std::string(name)));
+}
+
+extern "C" rust_rocksdb_sst_file_reader_iterator_t*
+rust_rocksdb_sst_file_reader_new_iterator(
+    rust_rocksdb_sst_file_reader_t* reader,
+    const rocksdb_readoptions_t* options) {
+  auto* iter = new rust_rocksdb_sst_file_reader_iterator_t;
+  iter->rep =
+      reader->rep->NewIterator(*reinterpret_cast<const ReadOptions*>(options));
+  return iter;
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_destroy(
+    rust_rocksdb_sst_file_reader_t* reader) {
+  delete reader->rep;
+  delete reader;
+}
+
+extern "C" unsigned char rust_rocksdb_sst_file_reader_iter_valid(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  return iter->rep->Valid();
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_seek_to_first(
+    rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  iter->rep->SeekToFirst();
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_seek_to_last(
+    rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  iter->rep->SeekToLast();
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_seek(
+    rust_rocksdb_sst_file_reader_iterator_t* iter, const char* k, size_t klen) {
+  iter->rep->Seek(Slice(k, klen));
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_seek_for_prev(
+    rust_rocksdb_sst_file_reader_iterator_t* iter, const char* k, size_t klen) {
+  iter->rep->SeekForPrev(Slice(k, klen));
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_next(
+    rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  iter->rep->Next();
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_prev(
+    rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  iter->rep->Prev();
+}
+
+extern "C" const char* rust_rocksdb_sst_file_reader_iter_key(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, size_t* klen) {
+  Slice key = iter->rep->key();
+  *klen = key.size();
+  return key.data();
+}
+
+extern "C" const char* rust_rocksdb_sst_file_reader_iter_value(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, size_t* vlen) {
+  Slice value = iter->rep->value();
+  *vlen = value.size();
+  return value.data();
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_get_error(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, char** errptr) {
+  RustSaveError(errptr, iter->rep->status());
+}
+
+extern "C" void rust_rocksdb_sst_file_reader_iter_destroy(
+    rust_rocksdb_sst_file_reader_iterator_t* iter) {
+  delete iter->rep;
+  delete iter;
 }

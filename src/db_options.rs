@@ -4653,6 +4653,18 @@ impl IngestExternalFileOptions {
             ffi::rocksdb_ingestexternalfileoptions_set_ingest_behind(self.inner, c_uchar::from(v));
         }
     }
+
+    /// If true, ingestion fails when the file(s) cannot be placed at the
+    /// last (bottommost) level. Clear the overlapping key ranges and retry.
+    /// Default: false.
+    pub fn fail_if_not_bottommost_level(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_ingestexternalfileoptions_set_fail_if_not_bottommost_level(
+                self.inner,
+                c_uchar::from(v),
+            );
+        }
+    }
 }
 
 impl Default for IngestExternalFileOptions {

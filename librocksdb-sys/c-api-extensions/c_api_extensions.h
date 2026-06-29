@@ -164,6 +164,59 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_eventlistener_destroy(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_add_eventlistener(
     rocksdb_options_t*, rust_rocksdb_eventlistener_t*);
 
+/* -------------------------------------------------------------------------
+ * SstFileReader
+ *
+ * RocksDB's C++ `SstFileReader` (read keys/values directly from a standalone
+ * .sst file, without a live DB) has no wrapper in upstream `c.h`. This block
+ * exposes a reader handle plus a self-contained iterator over it.
+ *
+ * The iterator is its own type rather than the upstream `rocksdb_iterator_t`:
+ * that struct's layout is private to `db/c.cc`, so it cannot be constructed
+ * from this separate translation unit. The iterator functions below mirror
+ * the upstream `rocksdb_iter_*` surface one-for-one.
+ *
+ * Mirrors the long-standing SstFileReader C API carried in downstream forks;
+ * delete this block if/when an equivalent lands in upstream `c.h`.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_sst_file_reader_t rust_rocksdb_sst_file_reader_t;
+typedef struct rust_rocksdb_sst_file_reader_iterator_t
+    rust_rocksdb_sst_file_reader_iterator_t;
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_sst_file_reader_t*
+rust_rocksdb_sst_file_reader_create(const rocksdb_options_t* options);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_open(
+    rust_rocksdb_sst_file_reader_t* reader, const char* name, char** errptr);
+extern ROCKSDB_LIBRARY_API rust_rocksdb_sst_file_reader_iterator_t*
+rust_rocksdb_sst_file_reader_new_iterator(
+    rust_rocksdb_sst_file_reader_t* reader,
+    const rocksdb_readoptions_t* options);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_destroy(
+    rust_rocksdb_sst_file_reader_t* reader);
+
+extern ROCKSDB_LIBRARY_API unsigned char rust_rocksdb_sst_file_reader_iter_valid(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_seek_to_first(
+    rust_rocksdb_sst_file_reader_iterator_t* iter);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_seek_to_last(
+    rust_rocksdb_sst_file_reader_iterator_t* iter);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_seek(
+    rust_rocksdb_sst_file_reader_iterator_t* iter, const char* k, size_t klen);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_seek_for_prev(
+    rust_rocksdb_sst_file_reader_iterator_t* iter, const char* k, size_t klen);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_next(
+    rust_rocksdb_sst_file_reader_iterator_t* iter);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_prev(
+    rust_rocksdb_sst_file_reader_iterator_t* iter);
+extern ROCKSDB_LIBRARY_API const char* rust_rocksdb_sst_file_reader_iter_key(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, size_t* klen);
+extern ROCKSDB_LIBRARY_API const char* rust_rocksdb_sst_file_reader_iter_value(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, size_t* vlen);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_get_error(
+    const rust_rocksdb_sst_file_reader_iterator_t* iter, char** errptr);
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_destroy(
+    rust_rocksdb_sst_file_reader_iterator_t* iter);
+
 #ifdef __cplusplus
 }
 #endif
