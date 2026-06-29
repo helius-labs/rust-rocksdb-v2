@@ -105,6 +105,7 @@ pub mod properties;
 mod slice_transform;
 mod snapshot;
 pub mod sst_file_manager;
+mod sst_file_reader;
 mod sst_file_writer;
 pub mod statistics;
 mod transactions;
@@ -146,6 +147,7 @@ pub use crate::{
     slice_transform::SliceTransform,
     snapshot::{Snapshot, SnapshotWithThreadMode},
     sst_file_manager::SstFileManager,
+    sst_file_reader::{SstFileReader, SstFileReaderIterator},
     sst_file_writer::SstFileWriter,
     transactions::{
         OptimisticTransactionDB, OptimisticTransactionOptions, Transaction, TransactionDB,
