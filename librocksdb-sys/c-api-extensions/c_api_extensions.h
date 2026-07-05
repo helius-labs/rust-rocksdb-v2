@@ -89,6 +89,22 @@ extern ROCKSDB_LIBRARY_API double rocksdb_compactoptions_get_blob_garbage_collec
     rocksdb_compactoptions_t*);
 
 /* -------------------------------------------------------------------------
+ * IngestExternalFileOptions::link_files
+ *
+ * Same as move_files except the input files are hard-linked into the DB and
+ * NOT unlinked after a successful ingestion, so they stay usable by their
+ * owner (e.g. a live source DB). Only one of move_files and link_files may
+ * be set. The C++ option has no upstream C wrapper yet; the setter mirrors
+ * upstream's rocksdb_ingestexternalfileoptions_set_move_files, and the
+ * getter exists so tests can round-trip the value through the underlying
+ * struct.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rocksdb_ingestexternalfileoptions_set_link_files(
+    rocksdb_ingestexternalfileoptions_t*, unsigned char);
+extern ROCKSDB_LIBRARY_API unsigned char rocksdb_ingestexternalfileoptions_get_link_files(
+    rocksdb_ingestexternalfileoptions_t*);
+
+/* -------------------------------------------------------------------------
  * EventListener background error status severity and recovery callbacks
  *
  * RocksDB's C++ EventListener exposes Status::Severity on background errors

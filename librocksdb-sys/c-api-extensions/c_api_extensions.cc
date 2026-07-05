@@ -29,6 +29,7 @@ using ROCKSDB_NAMESPACE::DB;
 using ROCKSDB_NAMESPACE::EventListener;
 using ROCKSDB_NAMESPACE::ExternalFileIngestionInfo;
 using ROCKSDB_NAMESPACE::FlushJobInfo;
+using ROCKSDB_NAMESPACE::IngestExternalFileOptions;
 using ROCKSDB_NAMESPACE::Options;
 using ROCKSDB_NAMESPACE::ReadOptions;
 using ROCKSDB_NAMESPACE::Status;
@@ -355,6 +356,20 @@ extern "C" void rocksdb_compactoptions_set_blob_garbage_collection_age_cutoff(
 extern "C" double rocksdb_compactoptions_get_blob_garbage_collection_age_cutoff(
     rocksdb_compactoptions_t* opt) {
   return reinterpret_cast<CompactRangeOptions*>(opt)->blob_garbage_collection_age_cutoff;
+}
+
+// -----------------------------------------------------------------------------
+// IngestExternalFileOptions::link_files
+// -----------------------------------------------------------------------------
+
+extern "C" void rocksdb_ingestexternalfileoptions_set_link_files(
+    rocksdb_ingestexternalfileoptions_t* opt, unsigned char v) {
+  reinterpret_cast<IngestExternalFileOptions*>(opt)->link_files = v;
+}
+
+extern "C" unsigned char rocksdb_ingestexternalfileoptions_get_link_files(
+    rocksdb_ingestexternalfileoptions_t* opt) {
+  return reinterpret_cast<IngestExternalFileOptions*>(opt)->link_files;
 }
 
 // -----------------------------------------------------------------------------
