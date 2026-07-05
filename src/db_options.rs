@@ -4608,6 +4608,23 @@ impl IngestExternalFileOptions {
         }
     }
 
+    /// Same as `set_move_files` except that the input files are hard-linked
+    /// into the DB and NOT unlinked after a successful ingestion, so they
+    /// stay usable by their owner (e.g. a live source DB). Only one of
+    /// `move_files` and `link_files` can be set at the same time.
+    pub fn set_link_files(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_ingestexternalfileoptions_set_link_files(self.inner, c_uchar::from(v));
+        }
+    }
+
+    /// Returns the current `link_files` value. Reads through to the C API
+    /// getter so tests can confirm the setter mutates the underlying
+    /// `IngestExternalFileOptions` struct.
+    pub fn get_link_files(&self) -> bool {
+        unsafe { ffi::rocksdb_ingestexternalfileoptions_get_link_files(self.inner) != 0 }
+    }
+
     /// If set to false, an ingested file keys could appear in existing snapshots
     /// that where created before the file was ingested.
     pub fn set_snapshot_consistency(&mut self, v: bool) {

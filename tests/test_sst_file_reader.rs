@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rust_rocksdb::{IngestExternalFileOptions, Options, ReadOptions, SstFileReader, SstFileWriter};
+use rust_rocksdb::{
+    DB, IngestExternalFileOptions, Options, ReadOptions, SstFileReader, SstFileWriter,
+};
 
 fn write_sst(path: &std::path::Path, pairs: &[(&[u8], &[u8])]) {
     let opts = Options::default();
@@ -114,4 +116,42 @@ fn ingest_external_file_options_fail_if_not_bottommost_level_is_settable() {
     let mut opts = IngestExternalFileOptions::default();
     opts.fail_if_not_bottommost_level(true);
     opts.fail_if_not_bottommost_level(false);
+}
+
+#[test]
+fn ingest_external_file_options_link_files_round_trips() {
+    // Round-trip through the getter to confirm the extension setter mutates
+    // the underlying IngestExternalFileOptions struct rather than being a
+    // no-op shim (this would catch upstream adding a field before `rep`).
+    let mut opts = IngestExternalFileOptions::default();
+    assert!(!opts.get_link_files());
+    opts.set_link_files(true);
+    assert!(opts.get_link_files());
+    opts.set_link_files(false);
+    assert!(!opts.get_link_files());
+}
+
+#[test]
+fn ingest_with_link_files_keeps_source_file() {
+    let dir = tempfile::Builder::new()
+        .prefix("_rust_rocksdb_ingest_link_files")
+        .tempdir()
+        .unwrap();
+    let sst_path = dir.path().join("data.sst");
+    write_sst(&sst_path, &[(b"k1", b"v1"), (b"k2", b"v2")]);
+
+    let mut db_opts = Options::default();
+    db_opts.create_if_missing(true);
+    let db = DB::open(&db_opts, dir.path().join("db")).unwrap();
+
+    let mut ingest_opts = IngestExternalFileOptions::default();
+    ingest_opts.set_link_files(true);
+    db.ingest_external_file_opts(&ingest_opts, vec![&sst_path])
+        .unwrap();
+
+    assert_eq!(db.get(b"k1").unwrap().as_deref(), Some(b"v1".as_ref()));
+    assert_eq!(db.get(b"k2").unwrap().as_deref(), Some(b"v2".as_ref()));
+
+    // Unlike move_files, link_files must leave the source file in place.
+    assert!(sst_path.exists());
 }
