@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
+  11.6.0 (branch `11.6.fb`). (helius-labs)
+
 ## 0.51.0 (2026-06-26)
 
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to

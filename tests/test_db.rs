@@ -432,10 +432,14 @@ fn set_column_family_metadata_test() {
         let cf1 = db.cf_handle(DEFAULT_COLUMN_FAMILY_NAME).unwrap();
         db.put_cf(&cf1, b"key1", b"value").unwrap();
 
+        // Write enough distinct keys that cf2's SST is bigger than the
+        // default CF's regardless of compression or per-file metadata
+        // overhead, which dominate at very small file sizes.
         let cf2 = db.cf_handle("cf2").unwrap();
-        db.put_cf(&cf2, b"key1", b"value").unwrap();
-        db.put_cf(&cf2, b"key2", b"value").unwrap();
-        db.put_cf(&cf2, b"key3", b"value").unwrap();
+        for i in 0..100 {
+            db.put_cf(&cf2, format!("key{i:03}"), format!("value{i:03}"))
+                .unwrap();
+        }
 
         db.flush_cf(&cf1).unwrap();
         db.flush_cf(&cf2).unwrap();
@@ -1825,7 +1829,7 @@ fn test_db_version() {
         .expect("can read the LOG file");
 
     // Make sure to update this test when upgrading to a new version!
-    assert!(settings.contains("RocksDB version: 11.1.2"));
+    assert!(settings.contains("RocksDB version: 11.6.0"));
 }
 
 #[test]
