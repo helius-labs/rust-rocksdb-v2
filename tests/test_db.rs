@@ -421,6 +421,30 @@ fn get_statistics_test() {
 }
 
 #[test]
+fn reset_statistics_test() {
+    let path = DBPath::new("_rust_rocksdb_reset_statisticstest");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        opts.create_missing_column_families(true);
+        opts.enable_statistics();
+        opts.set_statistics_level(StatsLevel::All);
+        let db = DB::open_cf(&opts, &path, vec!["cf1"]).unwrap();
+        let cf = db.cf_handle("cf1").unwrap();
+
+        db.put_cf(&cf, b"key1", b"value").unwrap();
+        db.flush_cf(&cf).unwrap();
+        assert!(opts.get_ticker_count(Ticker::BytesWritten) > 0);
+        assert!(opts.get_histogram_data(Histogram::DbWrite).count() > 0);
+
+        opts.reset_statistics().unwrap();
+
+        assert_eq!(opts.get_ticker_count(Ticker::BytesWritten), 0);
+        assert_eq!(opts.get_histogram_data(Histogram::DbWrite).count(), 0);
+    }
+}
+
+#[test]
 fn set_column_family_metadata_test() {
     let path = DBPath::new("_set_column_family_metadata_test");
     {

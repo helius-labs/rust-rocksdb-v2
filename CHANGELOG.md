@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased (helius-labs fork)
+
+- feat: add `Options::reset_statistics`, exposing C++
+  `Statistics::Reset()` (zeroes all ticker and histogram stats) through
+  a local C API extension. (helius-labs)
+
 ## 0.52.0 (2026-08-08)
 
 This release contains breaking API changes, marked `fix!` and `feat!`
