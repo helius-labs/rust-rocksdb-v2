@@ -3115,6 +3115,18 @@ impl Options {
         unsafe { ffi::rocksdb_options_set_statistics_level(self.inner, level as c_int) }
     }
 
+    /// Resets all ticker and histogram statistics to zero.
+    ///
+    /// A no-op unless stats were enabled first using
+    /// [`enable_statistics`](Self::enable_statistics). The `rocksdb.stats`
+    /// property is unaffected.
+    pub fn reset_statistics(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_options_statistics_reset(self.inner));
+        }
+        Ok(())
+    }
+
     /// Returns a counter if statistics are enabled using
     /// [`enable_statistics`](Self::enable_statistics).
     pub fn get_ticker_count(&self, ticker: Ticker) -> u64 {
