@@ -165,6 +165,17 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_get_error(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_destroy(
     rust_rocksdb_sst_file_reader_iterator_t* iter);
 
+/* -------------------------------------------------------------------------
+ * Statistics reset
+ *
+ * C++ `Statistics::Reset()` (rocksdb/statistics.h) zeroes all ticker and
+ * histogram stats, but upstream `c.h` has no wrapper for it. This is a thin
+ * additive wrapper over the statistics object owned by the options. A no-op
+ * when statistics were never enabled.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_statistics_reset(
+    rocksdb_options_t* opt, char** errptr);
+
 #ifdef __cplusplus
 }
 #endif

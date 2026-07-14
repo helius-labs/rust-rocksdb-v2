@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- feat: add `Options::reset_statistics`, exposing C++
+  `Statistics::Reset()` (zeroes all ticker and histogram stats) through
+  a local C API extension. (helius-labs)
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
   11.6.0 (branch `11.6.fb`). (helius-labs)
 
