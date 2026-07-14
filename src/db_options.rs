@@ -4641,6 +4641,20 @@ impl IngestExternalFileOptions {
         }
     }
 
+    /// If set to true, ingestion fails unless every file can be placed at the
+    /// bottommost level (no overlap with existing keys anywhere in the LSM
+    /// tree). Useful as a safety net for bulk-load pipelines that guarantee
+    /// non-overlapping, pre-sorted SSTs. `ingest_behind` takes precedence
+    /// over this option.
+    pub fn set_fail_if_not_bottommost_level(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_ingestexternalfileoptions_set_fail_if_not_bottommost_level(
+                self.inner,
+                c_uchar::from(v),
+            );
+        }
+    }
+
     /// Set to true if you would like duplicate keys in the file being ingested
     /// to be skipped rather than overwriting existing data under that key.
     /// Usecase: back-fill of some historical data in the database without
