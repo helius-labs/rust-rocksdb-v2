@@ -19,6 +19,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/sst_file_reader.h"
+#include "rocksdb/statistics.h"
 
 using ROCKSDB_NAMESPACE::BackgroundErrorRecoveryInfo;
 using ROCKSDB_NAMESPACE::CompactionJobInfo;
@@ -377,4 +378,20 @@ extern "C" void rust_rocksdb_sst_file_reader_iter_destroy(
     rust_rocksdb_sst_file_reader_iterator_t* iter) {
   delete iter->rep;
   delete iter;
+}
+
+// -----------------------------------------------------------------------------
+// Statistics reset
+//
+// `rocksdb_options_t` wraps `Options` as its first member, so a
+// `reinterpret_cast` recovers the C++ object (see the SstFileReader block).
+// -----------------------------------------------------------------------------
+
+extern "C" void rust_rocksdb_options_statistics_reset(rocksdb_options_t* opt,
+                                                      char** errptr) {
+  auto* options = reinterpret_cast<Options*>(opt);
+  if (options->statistics == nullptr) {
+    return;
+  }
+  RustSaveError(errptr, options->statistics->Reset());
 }
