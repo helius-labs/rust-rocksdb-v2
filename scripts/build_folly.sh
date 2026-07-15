@@ -64,8 +64,8 @@ FOLLY_DIR="$ROCKSDB_DIR/third-party/folly"
 mkdir -p "$ROCKSDB_DIR/third-party"
 mkdir -p "$SCRATCH_DIR"
 
-# The pinned folly commit needs liburing >= 2.7 - it references the
-# `io_uring_zcrx_*` zero-copy receive API in
+# The pinned folly commit needs liburing >= 2.10 - it references the
+# `io_uring_zcrx_*` zero-copy receive structs (added in liburing 2.10) in
 # `folly/io/async/IoUringZeroCopyBufferPool.cpp`, plus `IOU_PBUF_RING_INC` and
 # `io_uring_buf_ring_head` from liburing 2.6 in `IoUringProvidedBufferRing.cpp`.
 # folly's getdeps does not fetch liburing as a managed dep, so we must ensure
@@ -82,11 +82,11 @@ if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
     sys_rest="${sys_version#*.}"
     sys_minor="${sys_rest%%.*}"
     if [ "${sys_major:-0}" -gt 2 ] \
-       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 7 ]; }; then
-        echo ">>> System liburing $sys_version is sufficient (need >= 2.7); skipping source build."
+       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 10 ]; }; then
+        echo ">>> System liburing $sys_version is sufficient (need >= 2.10); skipping source build."
         need_liburing_build=no
     else
-        echo ">>> System liburing $sys_version is too old (need >= 2.7)."
+        echo ">>> System liburing $sys_version is too old (need >= 2.10)."
     fi
 else
     echo ">>> liburing not found via pkg-config."
@@ -99,7 +99,7 @@ if [ "$need_liburing_build" = "yes" ]; then
         echo "(Ubuntu 25.10+, Debian trixie+, etc)." >&2
         exit 1
     fi
-    liburing_version="2.9"
+    liburing_version="2.11"
     liburing_prefix="$SCRATCH_DIR/liburing-$liburing_version"
     if [ ! -f "$liburing_prefix/lib/pkgconfig/liburing.pc" ]; then
         echo ">>> Building liburing $liburing_version from source..."
