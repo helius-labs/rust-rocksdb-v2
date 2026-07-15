@@ -225,6 +225,16 @@ fn main() {
 
     let backend = Backend::resolve(&target);
 
+    // Must run before anything that can emit system lib dirs (notably the
+    // io-uring feature's pkg-config probe, which emits e.g.
+    // `-L /usr/lib/x86_64-linux-gnu`). `-L` directory order decides which
+    // libglog/libgflags the linker binds; on hosts with a system glog or
+    // gflags installed, the system copies would otherwise shadow the getdeps
+    // copies folly was compiled against (observed as undefined `google::*`
+    // symbols at link time).
+    #[cfg(feature = "coroutines")]
+    coroutines::emit_link_search_paths();
+
     // Re-run build.rs if the local C-API extensions change. The
     // extensions are a small handful of files outside the submodule
     // (see librocksdb-sys/c-api-extensions/) compiled and linked into
@@ -1213,37 +1223,52 @@ mod coroutines {
         }
     }
 
-    /// Link-time configuration: emit the `cargo::rustc-link-*` directives
-    /// for folly and its transitive deps. Order matters — folly must be
-    /// listed *after* librocksdb on the link line so its coroutine symbols
-    /// satisfy RocksDB's references.
+    /// All native library directories for folly + its transitive deps.
+    fn link_search_dirs(install_root: &Path) -> Vec<PathBuf> {
+        vec![
+            resolve_dep(install_root, "folly").join("lib"),
+            resolve_dep(install_root, "boost").join("lib"),
+            resolve_dep(install_root, "double-conversion").join("lib"),
+            resolve_dep(install_root, "libevent").join("lib"),
+            resolve_dep(install_root, "libsodium").join("lib"),
+            libdir_containing(&resolve_dep(install_root, "libiberty"), "iberty"),
+            libdir_containing(&resolve_dep(install_root, "glog"), "glog"),
+            libdir_containing(&resolve_dep(install_root, "gflags"), "gflags"),
+            libdir_containing(&resolve_dep(install_root, "fmt"), "fmt"),
+        ]
+    }
+
+    /// Emit the `rustc-link-search` directives for folly's dependency tree.
+    ///
+    /// This must run *early* in main(), before anything that can emit system
+    /// library directories (notably the io-uring feature's pkg-config probe,
+    /// which emits e.g. `-L /usr/lib/x86_64-linux-gnu`). The linker resolves
+    /// `-l` against `-L` directories in order, so getdeps' glog/gflags/etc.
+    /// must precede any system directory that may contain a same-named,
+    /// ABI-incompatible copy (common on hosts with libgoogle-glog-dev
+    /// installed).
+    pub(super) fn emit_link_search_paths() {
+        let install_root = install_root();
+        for dir in link_search_dirs(&install_root) {
+            println!("cargo::rustc-link-search=native={}", dir.display());
+        }
+    }
+
+    /// Link-time configuration: emit the `cargo::rustc-link-lib` directives
+    /// for folly and its transitive deps (search paths are emitted earlier by
+    /// `emit_link_search_paths`). Order matters — folly must be listed
+    /// *after* librocksdb on the link line so its coroutine symbols satisfy
+    /// RocksDB's references.
     pub(super) fn link() {
         let install_root = install_root();
 
-        let folly = resolve_dep(&install_root, "folly");
-        let boost = resolve_dep(&install_root, "boost");
-        let fmt = resolve_dep(&install_root, "fmt");
-        let glog = resolve_dep(&install_root, "glog");
-        let gflags = resolve_dep(&install_root, "gflags");
-        let dbl_conv = resolve_dep(&install_root, "double-conversion");
-        let libevent = resolve_dep(&install_root, "libevent");
-        let libsodium = resolve_dep(&install_root, "libsodium");
-
         // folly itself
-        println!(
-            "cargo::rustc-link-search=native={}",
-            folly.join("lib").display()
-        );
         println!("cargo::rustc-link-lib=static=folly");
 
         // Boost components — list matches folly.mk's PLATFORM_LDFLAGS.
         // If FOLLY_COMMIT_HASH is bumped and a component vanishes, the
         // link will fail with "cannot find -lboost_<x>"; trim this list
         // then.
-        println!(
-            "cargo::rustc-link-search=native={}",
-            boost.join("lib").display()
-        );
         for c in [
             "context",
             "filesystem",
@@ -1256,35 +1281,24 @@ mod coroutines {
             println!("cargo::rustc-link-lib=static=boost_{c}");
         }
 
-        println!(
-            "cargo::rustc-link-search=native={}",
-            dbl_conv.join("lib").display()
-        );
         println!("cargo::rustc-link-lib=static=double-conversion");
-
-        println!(
-            "cargo::rustc-link-search=native={}",
-            libevent.join("lib").display()
-        );
         println!("cargo::rustc-link-lib=static=event");
-
-        println!(
-            "cargo::rustc-link-search=native={}",
-            libsodium.join("lib").display()
-        );
         println!("cargo::rustc-link-lib=static=sodium");
+
+        // libiberty is a getdeps dependency of folly: libfolly.a's
+        // Demangle.cpp.o binds to its demanglers (cplus_demangle_v3_callback
+        // and rust_demangle_callback) whenever getdeps' CMake made
+        // <demangle.h> visible during the folly build. Linking the archive is
+        // harmless when folly compiled its no-libiberty fallback instead —
+        // the unused members are simply dropped.
+        println!("cargo::rustc-link-lib=static=iberty");
 
         // glog and gflags build as shared libs only. We export their dirs
         // as `cargo::metadata=folly_glog_libdir` etc. so downstream binary
         // crates can embed rpath; cargo:rustc-link-arg doesn't propagate
         // through transitive `-sys` crates (rust-lang/cargo#9554).
-        let glog_libdir = libdir_containing(&glog, "glog");
-        let gflags_libdir = libdir_containing(&gflags, "gflags");
-        println!("cargo::rustc-link-search=native={}", glog_libdir.display());
-        println!(
-            "cargo::rustc-link-search=native={}",
-            gflags_libdir.display()
-        );
+        let glog_libdir = libdir_containing(&resolve_dep(&install_root, "glog"), "glog");
+        let gflags_libdir = libdir_containing(&resolve_dep(&install_root, "gflags"), "gflags");
         println!("cargo::rustc-link-lib=dylib=glog");
         println!("cargo::rustc-link-lib=dylib=gflags");
         println!(
@@ -1296,8 +1310,6 @@ mod coroutines {
             gflags_libdir.display()
         );
 
-        let fmt_libdir = libdir_containing(&fmt, "fmt");
-        println!("cargo::rustc-link-search=native={}", fmt_libdir.display());
         println!("cargo::rustc-link-lib=static=fmt");
 
         // folly transitive dep
