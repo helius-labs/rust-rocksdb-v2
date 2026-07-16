@@ -3379,6 +3379,24 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
+    /// Blocks scheduling of new background jobs and waits for in-flight
+    /// flushes and compactions to finish. Already-queued jobs beyond the
+    /// running set are left unscheduled rather than drained.
+    pub fn pause_background_work(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_pause_background_work(self.inner.inner()));
+        }
+        Ok(())
+    }
+
+    /// Re-enables background job scheduling after `pause_background_work`.
+    pub fn continue_background_work(&self) -> Result<(), Error> {
+        unsafe {
+            ffi_try!(ffi::rocksdb_continue_background_work(self.inner.inner()));
+        }
+        Ok(())
+    }
+
     fn drop_column_family<C>(
         &self,
         cf_inner: *mut ffi::rocksdb_column_family_handle_t,
