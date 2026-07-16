@@ -5198,6 +5198,28 @@ impl WaitForCompactOptions {
         }
     }
 
+    /// If true, wait for purge to complete.
+    ///
+    /// Default: false
+    pub fn set_wait_for_purge(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_wait_for_compact_options_set_wait_for_purge(self.inner, c_uchar::from(v));
+        }
+    }
+
+    /// If true, call Close() after waiting is done. By the time Close() is
+    /// called here, there should be no background jobs in progress and no new
+    /// background jobs should be added. DB may not have been closed if Close()
+    /// returned Aborted status due to unreleased snapshots in the system. See
+    /// comments in DB::Close() for details.
+    ///
+    /// Default: false
+    pub fn set_close_db(&mut self, v: bool) {
+        unsafe {
+            ffi::rocksdb_wait_for_compact_options_set_close_db(self.inner, c_uchar::from(v));
+        }
+    }
+
     /// Timeout in microseconds for waiting for compaction to complete.
     /// when timeout == 0, WaitForCompact() will wait as long as there's background
     /// work to finish.
