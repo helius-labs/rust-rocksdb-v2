@@ -445,6 +445,48 @@ fn reset_statistics_test() {
 }
 
 #[test]
+fn top_bits_sst_partitioner_cuts_compaction_outputs() {
+    let path = DBPath::new("_rust_rocksdb_top_bits_sst_partitioner");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+        // 2 top bits -> 4 buckets over the first key byte: 0x00.., 0x40..,
+        // 0x80.., 0xC0..
+        opts.set_top_bits_sst_partitioner(2);
+        let db = DB::open(&opts, &path).unwrap();
+
+        for first in [0x00u8, 0x40, 0x80, 0xC0] {
+            for i in 0..16u8 {
+                db.put([first | i, 1, 2, 3], b"value").unwrap();
+            }
+        }
+        db.flush().unwrap();
+        // Second, overlapping L0 file: a single non-overlapping file would
+        // trivially move to the bottommost level, which skips the
+        // partitioner (Compaction::IsTrivialMove only consults it when
+        // output_level + 1 < num_levels). Overlap forces a real rewrite.
+        for first in [0x00u8, 0x40, 0x80, 0xC0] {
+            db.put([first, 9, 9, 9], b"value2").unwrap();
+        }
+        db.flush().unwrap();
+        db.compact_range(None::<&[u8]>, None::<&[u8]>);
+
+        let files = db.live_files().unwrap();
+        // Two flushed L0 files spanning all buckets become one compacted
+        // file per bucket.
+        assert_eq!(files.len(), 4, "{files:?}");
+        for file in &files {
+            let bucket = |key: &Option<Vec<u8>>| key.as_ref().unwrap()[0] >> 6;
+            assert_eq!(
+                bucket(&file.start_key),
+                bucket(&file.end_key),
+                "file straddles a partition boundary: {file:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn set_column_family_metadata_test() {
     let path = DBPath::new("_set_column_family_metadata_test");
     {
