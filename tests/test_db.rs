@@ -989,6 +989,32 @@ fn wait_for_compact_test() {
 }
 
 #[test]
+fn wait_for_compact_close_db_test() {
+    let path = DBPath::new("_rust_rocksdb_wait_for_compact_close_db_test");
+    {
+        let mut opts = Options::default();
+        opts.create_if_missing(true);
+
+        let mut wait_for_compact_opts: WaitForCompactOptions = WaitForCompactOptions::default();
+        wait_for_compact_opts.set_flush(true);
+        wait_for_compact_opts.set_wait_for_purge(true);
+        wait_for_compact_opts.set_close_db(true);
+
+        let db = DB::open(&opts, &path).unwrap();
+        db.put(b"k1", b"v1").unwrap();
+        db.put(b"k2", b"v2").unwrap();
+
+        db.wait_for_compact(&wait_for_compact_opts).unwrap();
+
+        // The DB was closed by wait_for_compact; a subsequent open must not
+        // hit the still-held-lock error a live handle would cause.
+        drop(db);
+        let db = DB::open(&opts, &path).unwrap();
+        assert_eq!(db.get(b"k1").unwrap().unwrap(), b"v1");
+    }
+}
+
+#[test]
 fn env_and_dbpaths_test() {
     let path = DBPath::new("_rust_rocksdb_dbpath_test");
     let path1 = DBPath::new("_rust_rocksdb_dbpath_test_1");
