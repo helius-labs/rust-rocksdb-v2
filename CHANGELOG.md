@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- feat: add `Options::set_top_bits_sst_partitioner`, installing an
+  `SstPartitionerFactory` (via a local C API extension) that cuts
+  compaction output files whenever the top `bits` bits of the first
+  4 key bytes change — `2^bits` aligned hash-space partitions.
+  (helius-labs)
 - feat: add `Options::reset_statistics`, exposing C++
   `Statistics::Reset()` (zeroes all ticker and histogram stats) through
   a local C API extension. (helius-labs)
