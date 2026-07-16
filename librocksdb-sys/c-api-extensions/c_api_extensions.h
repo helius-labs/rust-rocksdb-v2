@@ -176,6 +176,28 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_sst_file_reader_iter_destroy(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_options_statistics_reset(
     rocksdb_options_t* opt, char** errptr);
 
+/* -------------------------------------------------------------------------
+ * Top-bits SST partitioner
+ *
+ * C++ `ColumnFamilyOptions::sst_partitioner_factory`
+ * (rocksdb/sst_partitioner.h) cuts compaction output files at caller-chosen
+ * key boundaries. Upstream `c.h` only wraps the fixed-prefix factory, which
+ * cannot express sub-byte boundaries. This wrapper installs a partitioner
+ * that buckets keys by the top `bits` bits of their first 4 bytes
+ * (zero-padded, big-endian) and cuts whenever the bucket changes — 2^bits
+ * equal hash-space partitions. Compaction outputs only; flushes (L0) and
+ * SstFileWriter files are unaffected.
+ *
+ * The factory is assigned directly onto the options instead of returning a
+ * `rocksdb_sst_partitioner_factory_t*`: that struct's layout is private to
+ * `db/c.cc`, so it cannot be constructed from this translation unit (same
+ * constraint as the SstFileReader iterator above). `bits` outside 1..=32 is
+ * clamped into range.
+ * ------------------------------------------------------------------------- */
+extern ROCKSDB_LIBRARY_API void
+rust_rocksdb_options_set_top_bits_sst_partitioner(rocksdb_options_t* opt,
+                                                  uint32_t bits);
+
 #ifdef __cplusplus
 }
 #endif

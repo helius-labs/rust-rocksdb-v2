@@ -3127,6 +3127,20 @@ impl Options {
         Ok(())
     }
 
+    /// Cuts compaction output files at top-`bits` boundaries of the first
+    /// 4 key bytes (zero-padded, big-endian), producing `2^bits` aligned
+    /// hash-space partitions: no output file ever straddles a partition
+    /// boundary, and files within one partition are eligible for trivial
+    /// moves.
+    ///
+    /// Applies to compaction outputs only — flushes (L0) and `SstFileWriter`
+    /// files are unaffected. `bits` outside `1..=32` is clamped.
+    pub fn set_top_bits_sst_partitioner(&mut self, bits: u32) {
+        unsafe {
+            ffi::rust_rocksdb_options_set_top_bits_sst_partitioner(self.inner, bits);
+        }
+    }
+
     /// Returns a counter if statistics are enabled using
     /// [`enable_statistics`](Self::enable_statistics).
     pub fn get_ticker_count(&self, ticker: Ticker) -> u64 {

@@ -19,6 +19,7 @@
 #include "rocksdb/options.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/sst_file_reader.h"
+#include "rocksdb/sst_partitioner.h"
 #include "rocksdb/statistics.h"
 
 using ROCKSDB_NAMESPACE::BackgroundErrorRecoveryInfo;
@@ -394,4 +395,78 @@ extern "C" void rust_rocksdb_options_statistics_reset(rocksdb_options_t* opt,
     return;
   }
   RustSaveError(errptr, options->statistics->Reset());
+}
+
+// -----------------------------------------------------------------------------
+// Top-bits SST partitioner
+//
+// Buckets a key by the top `bits` bits of its first 4 bytes (zero-padded,
+// big-endian) and cuts compaction output files whenever the bucket changes.
+// The bucket function must stay byte-for-byte equivalent to the archival
+// backfill's `PartitionedSstWriter::partition_id`, so live-compacted SSTs
+// never straddle a backfill partition boundary.
+// -----------------------------------------------------------------------------
+
+namespace {
+
+class TopBitsSstPartitioner : public ROCKSDB_NAMESPACE::SstPartitioner {
+ public:
+  explicit TopBitsSstPartitioner(uint32_t bits) : bits_(bits) {}
+
+  const char* Name() const override { return "TopBitsSstPartitioner"; }
+
+  ROCKSDB_NAMESPACE::PartitionerResult ShouldPartition(
+      const ROCKSDB_NAMESPACE::PartitionerRequest& request) override {
+    return Bucket(*request.prev_user_key) != Bucket(*request.current_user_key)
+               ? ROCKSDB_NAMESPACE::kRequired
+               : ROCKSDB_NAMESPACE::kNotRequired;
+  }
+
+  bool CanDoTrivialMove(const Slice& smallest_user_key,
+                        const Slice& largest_user_key) override {
+    return Bucket(smallest_user_key) == Bucket(largest_user_key);
+  }
+
+ private:
+  uint32_t Bucket(const Slice& key) const {
+    unsigned char buf[4] = {0, 0, 0, 0};
+    size_t len = key.size() < 4 ? key.size() : 4;
+    std::memcpy(buf, key.data(), len);
+    uint32_t prefix = (uint32_t{buf[0]} << 24) | (uint32_t{buf[1]} << 16) |
+                      (uint32_t{buf[2]} << 8) | uint32_t{buf[3]};
+    return prefix >> (32 - bits_);
+  }
+
+  uint32_t bits_;
+};
+
+class TopBitsSstPartitionerFactory
+    : public ROCKSDB_NAMESPACE::SstPartitionerFactory {
+ public:
+  explicit TopBitsSstPartitionerFactory(uint32_t bits) : bits_(bits) {}
+
+  const char* Name() const override { return "TopBitsSstPartitionerFactory"; }
+
+  std::unique_ptr<ROCKSDB_NAMESPACE::SstPartitioner> CreatePartitioner(
+      const ROCKSDB_NAMESPACE::SstPartitioner::Context& /* context */)
+      const override {
+    return std::make_unique<TopBitsSstPartitioner>(bits_);
+  }
+
+ private:
+  uint32_t bits_;
+};
+
+}  // namespace
+
+extern "C" void rust_rocksdb_options_set_top_bits_sst_partitioner(
+    rocksdb_options_t* opt, uint32_t bits) {
+  if (bits < 1) {
+    bits = 1;
+  } else if (bits > 32) {
+    bits = 32;
+  }
+  auto* options = reinterpret_cast<Options*>(opt);
+  options->sst_partitioner_factory =
+      std::make_shared<TopBitsSstPartitionerFactory>(bits);
 }
