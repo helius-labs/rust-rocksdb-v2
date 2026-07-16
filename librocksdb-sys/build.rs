@@ -1168,6 +1168,17 @@ mod coroutines {
         cfg.define("USE_FOLLY", None);
         cfg.define("FOLLY_NO_CONFIG", None);
         cfg.define("HAVE_CXX11_ATOMIC", None);
+        // FOLLY_NO_CONFIG skips folly-config.h, which on Linux/ELF would set
+        // FOLLY_HAVE_WEAK_SYMBOLS=1. Without it, folly's MallocImpl.h falls
+        // back to declaring mallocx/mallctl/... as `extern` FUNCTION POINTERS,
+        // which clashes with the real function declarations jemalloc.h makes
+        // when the `jemalloc` feature is also enabled ("redeclared as a
+        // different kind of entity" in every TU that includes both, e.g.
+        // db_impl.cc via port/jemalloc_helper.h). Weak symbols are always
+        // available on the Linux/GCC/Clang targets this coroutines build
+        // supports, so define it unconditionally — matching what folly's own
+        // config detection would produce.
+        cfg.define("FOLLY_HAVE_WEAK_SYMBOLS", Some("1"));
 
         // GCC needs explicit -fcoroutines; clang enables coroutines under
         // -std=c++20 by default. Using `flag()` (not `flag_if_supported`)
