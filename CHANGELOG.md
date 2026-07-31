@@ -12,6 +12,12 @@
   a local C API extension. (helius-labs)
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
   11.8.0 (branch `11.8.fb`). (helius-labs)
+- fix(coroutines): repair the folly build for the newer folly commit
+  pinned by RocksDB 11.8 — cap getdeps' git-repo discovery at the
+  scratch dir so dependency patches apply, require/build liburing 2.14+
+  (2.15) instead of 2.9, compile RocksDB against the probed liburing
+  include path, and link folly's `fast_float` in place of the removed
+  `double-conversion` dependency. (helius-labs)
 
 ## 0.51.0 (2026-06-26)
 

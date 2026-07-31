@@ -276,16 +276,13 @@ The RocksDB team **has not published** an equivalent benchmark for local NVMe. T
 This feature is harder to build than the rest of the crate. Read all of the constraints below before starting.
 
 1. **Linux only.** macOS and Windows are not supported. Folly's build (`getdeps.py`) doesn't reliably work on macOS, and RocksDB's coroutine code path needs `io_uring`.
-2. **liburing ≥ 2.7.** The pinned folly commit references `io_uring_zcrx_*` symbols from liburing 2.7 (`IoUringZeroCopyBufferPool.cpp`) and `IOU_PBUF_RING_INC` / `io_uring_buf_ring_head` from liburing 2.6 (`IoUringProvidedBufferRing.cpp`). Distro coverage:
-   - Ubuntu 25.10+ (`liburing-dev` 2.11): works out of the box.
-   - Ubuntu 24.04 LTS (`liburing-dev` 2.5): too old. `scripts/build_folly.sh` auto-detects this and builds liburing 2.9 from source under the scratch directory, then exports `PKG_CONFIG_PATH` so folly and rust-rocksdb's `io-uring` feature both pick it up.
-   - Debian, RHEL, etc.: check `pkg-config --modversion liburing`; the script handles either case.
+2. **liburing ≥ 2.14.** The pinned folly commit references `struct zcrx_ctrl_export` / `zcrx_ctrl_flush_rq` and `IORING_ZCRX_AREA_SHIFT` from liburing 2.14 (`IoUringZeroCopyBufferPool.cpp`), plus `IORING_OP_RECV_ZC` and `io_uring_set_iowait()` from liburing 2.13 (`IoUringBackend.{h,cpp}`). As of mid-2026 no distro packages liburing ≥ 2.14 (Ubuntu 25.10 ships 2.11), so `scripts/build_folly.sh` detects the too-old system copy and builds liburing 2.15 from source under the scratch directory, then exports `PKG_CONFIG_PATH` so folly and rust-rocksdb's `io-uring` feature both pick it up. Check yours with `pkg-config --modversion liburing`.
 3. **A C/C++ compiler that is not GCC 15.** Folly's pinned libunwind dependency contains test code using legacy K&R-style empty parameter lists, which GCC 15 rejects under its default `-std=gnu23`. GCC 11–14 and Clang ≥ 14 all work. On Ubuntu 25.10 you can install `gcc-14`/`g++-14` from apt and switch via `update-alternatives` (see the CI workflow at `.github/workflows/coroutines.yml` for the exact commands).
 4. **Build dependencies.** On Ubuntu / Debian:
    ```bash
    apt-get install -y build-essential cmake ninja-build python3 python3-pip \
      pkg-config patchelf wget \
-     libdouble-conversion-dev libssl-dev liburing-dev \
+     libssl-dev liburing-dev \
      zlib1g-dev libbz2-dev autoconf automake libtool
    ```
    `wget` is needed because folly's getdeps shells out to it (`GETDEPS_USE_WGET=1`, inherited from RocksDB's own `folly.mk`).

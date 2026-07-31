@@ -64,17 +64,18 @@ FOLLY_DIR="$ROCKSDB_DIR/third-party/folly"
 mkdir -p "$ROCKSDB_DIR/third-party"
 mkdir -p "$SCRATCH_DIR"
 
-# The pinned folly commit needs liburing >= 2.7 - it references the
-# `io_uring_zcrx_*` zero-copy receive API in
-# `folly/io/async/IoUringZeroCopyBufferPool.cpp`, plus `IOU_PBUF_RING_INC` and
-# `io_uring_buf_ring_head` from liburing 2.6 in `IoUringProvidedBufferRing.cpp`.
+# The pinned folly commit needs liburing >= 2.14 - it references
+# `struct zcrx_ctrl_export` / `zcrx_ctrl_flush_rq` and
+# `IORING_ZCRX_AREA_SHIFT` (liburing 2.14) in
+# `folly/io/async/IoUringZeroCopyBufferPool.cpp`, plus `IORING_OP_RECV_ZC`
+# and `io_uring_set_iowait()` (liburing 2.13) in `IoUringBackend.{h,cpp}`.
 # folly's getdeps does not fetch liburing as a managed dep, so we must ensure
 # a sufficiently new version is on the system include/lib paths before
 # invoking it.
 #
-# Ubuntu 25.10+ and Debian trixie+ already package liburing >= 2.11 via apt.
-# Older distros (notably Ubuntu 24.04 LTS, which ships 2.5) need a manual
-# build. The check below is a no-op on hosts that are already up to date.
+# As of mid-2026 no distro packages liburing >= 2.14 (Ubuntu 25.10 ships
+# 2.11), so in practice the source build below runs everywhere. The check
+# keeps future hosts with a new enough system liburing on the fast path.
 need_liburing_build=yes
 if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
     sys_version="$(pkg-config --modversion liburing)"
@@ -82,11 +83,11 @@ if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists liburing; then
     sys_rest="${sys_version#*.}"
     sys_minor="${sys_rest%%.*}"
     if [ "${sys_major:-0}" -gt 2 ] \
-       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 7 ]; }; then
-        echo ">>> System liburing $sys_version is sufficient (need >= 2.7); skipping source build."
+       || { [ "${sys_major:-0}" -eq 2 ] && [ "${sys_minor:-0}" -ge 14 ]; }; then
+        echo ">>> System liburing $sys_version is sufficient (need >= 2.14); skipping source build."
         need_liburing_build=no
     else
-        echo ">>> System liburing $sys_version is too old (need >= 2.7)."
+        echo ">>> System liburing $sys_version is too old (need >= 2.14)."
     fi
 else
     echo ">>> liburing not found via pkg-config."
@@ -95,11 +96,10 @@ fi
 if [ "$need_liburing_build" = "yes" ]; then
     if ! command -v make >/dev/null 2>&1 || ! command -v cc >/dev/null 2>&1; then
         echo "Error: liburing source build requires 'make' and a C compiler." >&2
-        echo "Either install them, or upgrade your system liburing to 2.7+" >&2
-        echo "(Ubuntu 25.10+, Debian trixie+, etc)." >&2
+        echo "Either install them, or provide a system liburing >= 2.14." >&2
         exit 1
     fi
-    liburing_version="2.9"
+    liburing_version="2.15"
     liburing_prefix="$SCRATCH_DIR/liburing-$liburing_version"
     if [ ! -f "$liburing_prefix/lib/pkgconfig/liburing.pc" ]; then
         echo ">>> Building liburing $liburing_version from source..."
@@ -144,6 +144,16 @@ perl -pi -e 's/: environ/: (const char**)(environ)/ unless /\(const char\*\*\)\(
 echo ">>> Building folly + dependencies into $SCRATCH_DIR..."
 echo "    (allow 15-30 minutes on a cold cache)"
 cd "$FOLLY_DIR"
+# getdeps' _apply_patchfile runs `git rev-parse --show-toplevel` from each
+# extracted dependency source dir and, if it resolves, applies the patch from
+# that "repo root". Tarball-extracted deps under $SCRATCH_DIR are not git
+# repos, so discovery walks up and finds THIS repository when the scratch dir
+# is inside it (the default), making `git apply` run against rust-rocksdb's
+# tree and fail (e.g. "Failed to apply patch to boost"). Capping repository
+# discovery at the scratch dir restores getdeps' apply-in-src_dir fallback.
+# Deps with their own .git (folly via shipit) are unaffected: their root is
+# found before the ceiling is reached.
+export GIT_CEILING_DIRECTORIES="$SCRATCH_DIR${GIT_CEILING_DIRECTORIES:+:$GIT_CEILING_DIRECTORIES}"
 GETDEPS_USE_WGET=1 \
 CXXFLAGS=" -DHAVE_CXX11_ATOMIC " \
 python3 build/fbcode_builder/getdeps.py \

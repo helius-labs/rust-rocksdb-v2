@@ -752,7 +752,7 @@ mod vendor {
         #[cfg(feature = "io-uring")]
         {
             if _target.os == "linux" {
-                pkg_config::probe_library("liburing").unwrap_or_else(|e| {
+                let lib = pkg_config::probe_library("liburing").unwrap_or_else(|e| {
                     panic!(
                         "the `io-uring` feature was requested but pkg-config probe for \
                          `liburing` failed: {e}\n\
@@ -766,6 +766,15 @@ mod vendor {
                             and point PKG_CONFIG_PATH at the target sysroot's pkgconfig dir."
                     )
                 });
+                // Compile against the same liburing the probe linked. The
+                // probe's cargo directives only affect the link line; without
+                // the -I below, the C++ build silently falls back to the
+                // system headers, which breaks when PKG_CONFIG_PATH points at
+                // a newer liburing than the distro's (folly needs >= 2.14,
+                // see scripts/build_folly.sh).
+                for p in &lib.include_paths {
+                    _cfg.include(p);
+                }
                 _cfg.define("ROCKSDB_IOURING_PRESENT", Some("1"));
             }
         }
@@ -1197,7 +1206,7 @@ mod coroutines {
             "fmt",
             "glog",
             "gflags",
-            "double-conversion",
+            "fast_float",
             "libevent",
             "libsodium",
         ] {
@@ -1237,7 +1246,6 @@ mod coroutines {
         let fmt = resolve_dep(&install_root, "fmt");
         let glog = resolve_dep(&install_root, "glog");
         let gflags = resolve_dep(&install_root, "gflags");
-        let dbl_conv = resolve_dep(&install_root, "double-conversion");
         let libevent = resolve_dep(&install_root, "libevent");
         let libsodium = resolve_dep(&install_root, "libsodium");
 
@@ -1267,12 +1275,6 @@ mod coroutines {
         ] {
             println!("cargo::rustc-link-lib=static=boost_{c}");
         }
-
-        println!(
-            "cargo::rustc-link-search=native={}",
-            dbl_conv.join("lib").display()
-        );
-        println!("cargo::rustc-link-lib=static=double-conversion");
 
         println!(
             "cargo::rustc-link-search=native={}",
