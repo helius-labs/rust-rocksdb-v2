@@ -11,7 +11,7 @@
   `Statistics::Reset()` (zeroes all ticker and histogram stats) through
   a local C API extension. (helius-labs)
 - fix(librocksdb-sys): upgrade the bundled RocksDB submodule to
-  11.6.0 (branch `11.6.fb`). (helius-labs)
+  11.8.0 (branch `11.8.fb`). (helius-labs)
 
 ## 0.51.0 (2026-06-26)
 
