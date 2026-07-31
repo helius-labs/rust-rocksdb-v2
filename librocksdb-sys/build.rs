@@ -1242,6 +1242,17 @@ mod coroutines {
         let install_root = install_root();
 
         let folly = resolve_dep(&install_root, "folly");
+        // ROCKSDB_FOLLY_INSTALL_PATH is rerun-if-env-changed tracked, but its
+        // VALUE is stable across folly rebuilds (same path, new contents), so
+        // without this cargo reuses an rlib whose folly objects were compiled
+        // against the previous install and links it against the new one —
+        // symptom: glog ABI mismatches / undefined folly-dep symbols at the
+        // final bin link. Keying on libfolly.a's mtime forces a recompile
+        // whenever the install is rebuilt.
+        println!(
+            "cargo::rerun-if-changed={}",
+            folly.join("lib").join("libfolly.a").display()
+        );
         let boost = resolve_dep(&install_root, "boost");
         let fmt = resolve_dep(&install_root, "fmt");
         let glog = resolve_dep(&install_root, "glog");
