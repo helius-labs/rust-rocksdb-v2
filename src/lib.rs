@@ -122,8 +122,8 @@ pub use crate::{
     compaction_filter::Decision as CompactionDecision,
     db::{
         ColumnFamilyMetaData, DB, DBAccess, DBCommon, DBWithThreadMode, ExportImportFilesMetaData,
-        GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber, Range, SingleThreaded,
-        ThreadMode,
+        FileIngestionHandle, GetIntoBufferResult, LiveFile, MultiThreaded, PrefixProber, Range,
+        SingleThreaded, ThreadMode,
     },
     db_iterator::{
         DBIterator, DBIteratorWithThreadMode, DBRawIterator, DBRawIteratorWithThreadMode,

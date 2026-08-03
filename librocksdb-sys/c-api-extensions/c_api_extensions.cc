@@ -13,7 +13,9 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
@@ -469,4 +471,64 @@ extern "C" void rust_rocksdb_options_set_top_bits_sst_partitioner(
   auto* options = reinterpret_cast<Options*>(opt);
   options->sst_partitioner_factory =
       std::make_shared<TopBitsSstPartitionerFactory>(bits);
+}
+
+// -----------------------------------------------------------------------------
+// Two-phase external file ingestion
+//
+// `rocksdb_t` and `rocksdb_column_family_handle_t` hold their C++ object
+// pointer as the first struct member, and
+// `rocksdb_ingestexternalfileoptions_t` wraps `IngestExternalFileOptions` by
+// value as its first member, so a `reinterpret_cast` recovers each C++
+// object (see the SstFileReader block). The prepared-ingestion handle gets
+// its own opaque struct, owned entirely by this translation unit.
+// -----------------------------------------------------------------------------
+
+struct rust_rocksdb_file_ingestion_handle_t {
+  std::unique_ptr<ROCKSDB_NAMESPACE::FileIngestionHandle> rep;
+};
+
+extern "C" rust_rocksdb_file_ingestion_handle_t*
+rust_rocksdb_prepare_file_ingestion_cf(
+    rocksdb_t* db, rocksdb_column_family_handle_t* handle,
+    const rocksdb_ingestexternalfileoptions_t* opt,
+    const char* const* file_list, size_t list_len, char** errptr) {
+  ROCKSDB_NAMESPACE::IngestExternalFileArg arg;
+  arg.column_family =
+      *reinterpret_cast<ROCKSDB_NAMESPACE::ColumnFamilyHandle* const*>(handle);
+  arg.external_files.reserve(list_len);
+  for (size_t i = 0; i < list_len; ++i) {
+    arg.external_files.emplace_back(file_list[i]);
+  }
+  arg.options = *reinterpret_cast<
+      const ROCKSDB_NAMESPACE::IngestExternalFileOptions*>(opt);
+
+  std::unique_ptr<ROCKSDB_NAMESPACE::FileIngestionHandle> prepared;
+  ROCKSDB_NAMESPACE::Status status =
+      (*reinterpret_cast<DB* const*>(db))->PrepareFileIngestion({arg},
+                                                                &prepared);
+  if (RustSaveError(errptr, status)) {
+    return nullptr;
+  }
+  return new rust_rocksdb_file_ingestion_handle_t{std::move(prepared)};
+}
+
+extern "C" void rust_rocksdb_commit_file_ingestion_handles(
+    rocksdb_t* db, rust_rocksdb_file_ingestion_handle_t* const* handles,
+    size_t handles_len, char** errptr) {
+  std::vector<std::unique_ptr<ROCKSDB_NAMESPACE::FileIngestionHandle>>
+      to_commit;
+  to_commit.reserve(handles_len);
+  for (size_t i = 0; i < handles_len; ++i) {
+    to_commit.push_back(std::move(handles[i]->rep));
+    delete handles[i];
+  }
+  RustSaveError(errptr, (*reinterpret_cast<DB* const*>(db))
+                            ->CommitFileIngestionHandles(std::move(to_commit)));
+}
+
+extern "C" void rust_rocksdb_file_ingestion_handle_destroy(
+    rust_rocksdb_file_ingestion_handle_t* handle) {
+  // The unique_ptr destructor rolls the prepared ingestion back.
+  delete handle;
 }

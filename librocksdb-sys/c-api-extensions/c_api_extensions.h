@@ -198,6 +198,41 @@ extern ROCKSDB_LIBRARY_API void
 rust_rocksdb_options_set_top_bits_sst_partitioner(rocksdb_options_t* opt,
                                                   uint32_t bits);
 
+/* -------------------------------------------------------------------------
+ * Two-phase external file ingestion
+ *
+ * C++ `DB::PrepareFileIngestion()` / `DB::CommitFileIngestionHandles()`
+ * (rocksdb/db.h) split external SST ingestion into a mutex-free prepare
+ * phase and a short atomic commit that can cover handles for many column
+ * families in a single MANIFEST write. Upstream `c.h` only wraps the
+ * single-shot `IngestExternalFile(s)` entry points.
+ *
+ * `rust_rocksdb_prepare_file_ingestion_cf` prepares one column family's
+ * files and returns an opaque handle (NULL on error). Handles targeting the
+ * same column family must be prepared with the same options and are
+ * committed in argument order (later handles win for overlapping keys).
+ * `rust_rocksdb_commit_file_ingestion_handles` consumes every passed handle
+ * whether it succeeds or fails (on failure RocksDB rolls all of them back);
+ * the pointers must not be used or destroyed afterwards.
+ * `rust_rocksdb_file_ingestion_handle_destroy` rolls back and frees a
+ * handle that will not be committed. Handles must not outlive the DB.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_file_ingestion_handle_t
+    rust_rocksdb_file_ingestion_handle_t;
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_file_ingestion_handle_t*
+rust_rocksdb_prepare_file_ingestion_cf(
+    rocksdb_t* db, rocksdb_column_family_handle_t* handle,
+    const rocksdb_ingestexternalfileoptions_t* opt,
+    const char* const* file_list, size_t list_len, char** errptr);
+
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_commit_file_ingestion_handles(
+    rocksdb_t* db, rust_rocksdb_file_ingestion_handle_t* const* handles,
+    size_t handles_len, char** errptr);
+
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_file_ingestion_handle_destroy(
+    rust_rocksdb_file_ingestion_handle_t* handle);
+
 #ifdef __cplusplus
 }
 #endif
