@@ -19,6 +19,7 @@ use std::ffi::{CStr, CString};
 use std::fmt;
 use std::fs;
 use std::iter;
+use std::marker::PhantomData;
 use std::path::Path;
 use std::path::PathBuf;
 use std::ptr;
@@ -3676,6 +3677,68 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
     }
 
+    /// Prepares external SST files for ingestion into a column family
+    /// without committing them: everything that doesn't need the DB mutex
+    /// (validating the files, reserving internal file numbers, and
+    /// linking/copying them into the DB) happens here. Make the files
+    /// visible — atomically with other prepared handles, possibly for other
+    /// column families — with [`DBCommon::commit_file_ingestion_handles`];
+    /// dropping the handle instead rolls the prepared ingestion back.
+    /// Handles that target the same column family must be prepared with the
+    /// same `opts`.
+    pub fn prepare_file_ingestion_cf_opts<P: AsRef<Path>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        opts: &IngestExternalFileOptions,
+        paths: Vec<P>,
+    ) -> Result<FileIngestionHandle<'_>, Error> {
+        let paths_v: Vec<CString> = paths.iter().map(to_cpath).collect::<Result<Vec<_>, _>>()?;
+        let cpaths: Vec<_> = paths_v.iter().map(|path| path.as_ptr()).collect();
+        let inner = unsafe {
+            ffi_try!(ffi::rust_rocksdb_prepare_file_ingestion_cf(
+                self.inner.inner(),
+                cf.inner(),
+                opts.inner.cast_const(),
+                cpaths.as_ptr(),
+                cpaths.len(),
+            ))
+        };
+        Ok(FileIngestionHandle {
+            inner,
+            db: PhantomData,
+        })
+    }
+
+    /// Commits prepared ingestions (from
+    /// [`DBCommon::prepare_file_ingestion_cf_opts`]) atomically: every
+    /// handle's files become visible together under a single MANIFEST
+    /// write, or none do — on failure RocksDB rolls all of them back.
+    /// Handles targeting the same column family are committed in `handles`
+    /// order, so for overlapping keys a later handle's data wins.
+    pub fn commit_file_ingestion_handles(
+        &self,
+        handles: Vec<FileIngestionHandle<'_>>,
+    ) -> Result<(), Error> {
+        if handles.is_empty() {
+            return Ok(());
+        }
+        let ptrs: Vec<*mut ffi::rust_rocksdb_file_ingestion_handle_t> =
+            handles.iter().map(|handle| handle.inner).collect();
+        // The C call consumes every handle whether it succeeds or fails, so
+        // the Rust destructors must not run.
+        for handle in handles {
+            std::mem::forget(handle);
+        }
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_commit_file_ingestion_handles(
+                self.inner.inner(),
+                ptrs.as_ptr(),
+                ptrs.len(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Obtains the LSM-tree meta data of the default column family of the DB
     pub fn get_column_family_metadata(&self) -> ColumnFamilyMetaData {
         unsafe {
@@ -4363,6 +4426,28 @@ pub(crate) fn convert_values(
             }
         })
         .collect()
+}
+
+/// A prepared-but-uncommitted external file ingestion, produced by
+/// [`DBCommon::prepare_file_ingestion_cf_opts`]. Pass it to
+/// [`DBCommon::commit_file_ingestion_handles`] to make the prepared files
+/// visible; dropping an uncommitted handle rolls the ingestion back,
+/// deleting the staged files and releasing the reserved file numbers. The
+/// lifetime ties the handle to the DB that prepared it, which it must not
+/// outlive.
+pub struct FileIngestionHandle<'db> {
+    inner: *mut ffi::rust_rocksdb_file_ingestion_handle_t,
+    db: PhantomData<&'db ()>,
+}
+
+// An owned pointer to a prepared ingestion; RocksDB allows preparing on one
+// thread and committing (or aborting) on another.
+unsafe impl Send for FileIngestionHandle<'_> {}
+
+impl Drop for FileIngestionHandle<'_> {
+    fn drop(&mut self) {
+        unsafe { ffi::rust_rocksdb_file_ingestion_handle_destroy(self.inner) }
+    }
 }
 
 #[cfg(test)]

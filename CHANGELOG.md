@@ -2,6 +2,14 @@
 
 ## Unreleased (helius-labs fork)
 
+- feat: add two-phase external file ingestion bindings —
+  `DB::prepare_file_ingestion_cf_opts` returns a `FileIngestionHandle`
+  (dropping it rolls the prepared ingestion back) and
+  `DB::commit_file_ingestion_handles` commits any number of prepared
+  handles, across column families, in one atomic MANIFEST write.
+  Exposes C++ `DB::PrepareFileIngestion` /
+  `DB::CommitFileIngestionHandles` through a local C API extension.
+  (helius-labs)
 - feat: add `Options::set_top_bits_sst_partitioner`, installing an
   `SstPartitionerFactory` (via a local C API extension) that cuts
   compaction output files whenever the top `bits` bits of the first
