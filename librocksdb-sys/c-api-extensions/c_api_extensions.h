@@ -343,6 +343,59 @@ extern ROCKSDB_LIBRARY_API void rust_rocksdb_commit_file_ingestion_handles(
 extern ROCKSDB_LIBRARY_API void rust_rocksdb_file_ingestion_handle_destroy(
     rust_rocksdb_file_ingestion_handle_t* handle);
 
+/* -------------------------------------------------------------------------
+ * ReadScopedBlockBufferProvider
+ *
+ * C++ `ReadOptions::read_scoped_block_buffer_provider` (rocksdb/options.h,
+ * EXPERIMENTAL) lets scans place final data-block contents in caller-provided
+ * buffers instead of RocksDB-owned block memory, bypassing the data-block
+ * cache. Support is limited to block-based table iterators and MultiScan
+ * reads; mmap reads ignore the provider. Upstream calls this a C++-only
+ * option, so no `c.h` wrapper exists.
+ *
+ * `allocate` is called on whichever thread performs the read. On success it
+ * returns non-zero and fills `data` (writable memory for the block),
+ * `data_size` (usable bytes; must be >= `size`, and a multiple of `alignment`
+ * when `alignment` > 1) and `lease_state` (opaque per-lease handle). `data`
+ * must be aligned to `alignment` bytes (a power of two; 1 means unaligned).
+ * Returning zero fails the read with a memory-limit status.
+ *
+ * `release` is called exactly once per successful allocation, on whichever
+ * thread drops the last RocksDB reference to the block — including on later
+ * I/O or decompression failure. The memory behind `data` must stay valid
+ * until then.
+ *
+ * The provider must outlive every ReadOptions that references it and every
+ * lease it has handed out. `destroy` is called when the provider wrapper is
+ * destroyed.
+ * ------------------------------------------------------------------------- */
+typedef struct rust_rocksdb_read_scoped_block_buffer_provider_t
+    rust_rocksdb_read_scoped_block_buffer_provider_t;
+
+typedef unsigned char (*rust_rocksdb_block_buffer_allocate_cb)(
+    void* state, size_t size, size_t alignment, char** data, size_t* data_size,
+    void** lease_state);
+typedef void (*rust_rocksdb_block_buffer_release_cb)(void* state,
+                                                     void* lease_state);
+typedef void (*rust_rocksdb_block_buffer_provider_destroy_cb)(void* state);
+
+extern ROCKSDB_LIBRARY_API rust_rocksdb_read_scoped_block_buffer_provider_t*
+rust_rocksdb_read_scoped_block_buffer_provider_create(
+    void* state, rust_rocksdb_block_buffer_allocate_cb allocate,
+    rust_rocksdb_block_buffer_release_cb release,
+    rust_rocksdb_block_buffer_provider_destroy_cb destroy);
+
+extern ROCKSDB_LIBRARY_API void
+rust_rocksdb_read_scoped_block_buffer_provider_destroy(
+    rust_rocksdb_read_scoped_block_buffer_provider_t* provider);
+
+/* Passing NULL clears the provider. The provider is not owned by the read
+ * options and must outlive them. */
+extern ROCKSDB_LIBRARY_API void
+rust_rocksdb_readoptions_set_read_scoped_block_buffer_provider(
+    rocksdb_readoptions_t* options,
+    rust_rocksdb_read_scoped_block_buffer_provider_t* provider);
+
 #ifdef __cplusplus
 }
 #endif

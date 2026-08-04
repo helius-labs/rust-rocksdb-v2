@@ -90,6 +90,7 @@
 mod ffi_util;
 
 pub mod backup;
+pub mod block_buffer_provider;
 mod cache;
 pub mod checkpoint;
 mod column_family;
@@ -120,6 +121,7 @@ mod write_batch_with_index;
 mod write_buffer_manager;
 
 pub use crate::{
+    block_buffer_provider::{BufferLease, ReadScopedBlockBufferProvider},
     cache::Cache,
     column_family::{
         AsColumnFamilyRef, BoundColumnFamily, ColumnFamily, ColumnFamilyDescriptor,

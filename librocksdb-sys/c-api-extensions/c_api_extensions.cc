@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "rocksdb/cleanable.h"
 #include "rocksdb/db.h"
 #include "rocksdb/iterator.h"
 #include "rocksdb/listener.h"
@@ -1167,4 +1168,94 @@ extern "C" void rust_rocksdb_file_ingestion_handle_destroy(
     rust_rocksdb_file_ingestion_handle_t* handle) {
   // The unique_ptr destructor rolls the prepared ingestion back.
   delete handle;
+}
+
+// -----------------------------------------------------------------------------
+// ReadScopedBlockBufferProvider
+//
+// Adapts the C callback triple into the C++ `ReadScopedBlockBufferProvider`
+// interface (rocksdb/table.h). Each successful `Allocate()` registers the
+// release callback on a fresh `SharedCleanablePtr`, which RocksDB attaches to
+// the blocks and pinned slices backed by the lease; the callback runs once,
+// on whichever thread drops the last reference. `rocksdb_readoptions_t`
+// wraps `ReadOptions` as its first member, so a `reinterpret_cast` recovers
+// it (see the SstFileReader block).
+// -----------------------------------------------------------------------------
+
+namespace {
+
+class CBlockBufferProvider
+    : public ROCKSDB_NAMESPACE::ReadScopedBlockBufferProvider {
+ public:
+  CBlockBufferProvider(void* state,
+                       rust_rocksdb_block_buffer_allocate_cb allocate,
+                       rust_rocksdb_block_buffer_release_cb release,
+                       rust_rocksdb_block_buffer_provider_destroy_cb destroy)
+      : state_(state),
+        allocate_(allocate),
+        release_(release),
+        destroy_(destroy) {}
+
+  ~CBlockBufferProvider() override {
+    if (destroy_ != nullptr) {
+      destroy_(state_);
+    }
+  }
+
+  Status Allocate(size_t size, size_t alignment, Lease* out) override {
+    char* data = nullptr;
+    size_t data_size = 0;
+    void* lease_state = nullptr;
+    if (allocate_(state_, size, alignment, &data, &data_size, &lease_state) ==
+        0) {
+      return Status::MemoryLimit(
+          "read-scoped block buffer provider failed to allocate");
+    }
+    out->data = data;
+    out->size = data_size;
+    out->cleanup.Allocate();
+    out->cleanup->RegisterCleanup(&CBlockBufferProvider::ReleaseLease, this,
+                                  lease_state);
+    return Status::OK();
+  }
+
+ private:
+  static void ReleaseLease(void* arg1, void* arg2) {
+    auto* provider = static_cast<CBlockBufferProvider*>(arg1);
+    provider->release_(provider->state_, arg2);
+  }
+
+  void* state_;
+  rust_rocksdb_block_buffer_allocate_cb allocate_;
+  rust_rocksdb_block_buffer_release_cb release_;
+  rust_rocksdb_block_buffer_provider_destroy_cb destroy_;
+};
+
+}  // namespace
+
+struct rust_rocksdb_read_scoped_block_buffer_provider_t {
+  CBlockBufferProvider* rep;
+};
+
+extern "C" rust_rocksdb_read_scoped_block_buffer_provider_t*
+rust_rocksdb_read_scoped_block_buffer_provider_create(
+    void* state, rust_rocksdb_block_buffer_allocate_cb allocate,
+    rust_rocksdb_block_buffer_release_cb release,
+    rust_rocksdb_block_buffer_provider_destroy_cb destroy) {
+  auto* provider = new rust_rocksdb_read_scoped_block_buffer_provider_t;
+  provider->rep = new CBlockBufferProvider(state, allocate, release, destroy);
+  return provider;
+}
+
+extern "C" void rust_rocksdb_read_scoped_block_buffer_provider_destroy(
+    rust_rocksdb_read_scoped_block_buffer_provider_t* provider) {
+  delete provider->rep;
+  delete provider;
+}
+
+extern "C" void rust_rocksdb_readoptions_set_read_scoped_block_buffer_provider(
+    rocksdb_readoptions_t* options,
+    rust_rocksdb_read_scoped_block_buffer_provider_t* provider) {
+  reinterpret_cast<ReadOptions*>(options)->read_scoped_block_buffer_provider =
+      provider != nullptr ? provider->rep : nullptr;
 }
