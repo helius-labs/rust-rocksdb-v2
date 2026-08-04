@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- feat: add `ReadOptions::set_read_scoped_block_buffer_provider` and the
+  `ReadScopedBlockBufferProvider` trait / `BufferLease` type, exposing the
+  EXPERIMENTAL C++ `ReadOptions::read_scoped_block_buffer_provider` option
+  (block-based table iterator scans and MultiScan reads place final
+  data-block contents in caller-provided buffers, bypassing the data-block
+  cache) through a local C API extension. (helius-labs)
 - feat: add two-phase external file ingestion bindings —
   `DB::prepare_file_ingestion_cf_opts` returns a `FileIngestionHandle`
   (dropping it rolls the prepared ingestion back) and

@@ -29,6 +29,7 @@ use crate::statistics::{Histogram, HistogramData, StatsLevel};
 use crate::write_buffer_manager::WriteBufferManager;
 use crate::{
     ColumnFamilyDescriptor, Error, SnapshotWithThreadMode,
+    block_buffer_provider::{BlockBufferProviderHandle, ReadScopedBlockBufferProvider},
     compaction_filter::{self, CompactionFilterCallback, CompactionFilterFn},
     compaction_filter_factory::{self, CompactionFilterFactory},
     comparator::{
@@ -268,6 +269,11 @@ pub struct ReadOptions {
     iter_start_ts: Option<Vec<u8>>,
     iterate_upper_bound: Option<Vec<u8>>,
     iterate_lower_bound: Option<Vec<u8>>,
+    // The C++ option holds a non-owning raw pointer to the provider, so the
+    // `ReadOptions` owns the C wrapper keeping it alive. Iterators store
+    // their `ReadOptions` by value, extending the guarantee to every scan
+    // and pinned block created from them.
+    block_buffer_provider: Option<BlockBufferProviderHandle>,
 }
 
 /// Configuration of cuckoo-based storage.
@@ -4610,6 +4616,35 @@ impl ReadOptions {
             ffi::rocksdb_readoptions_set_iter_start_ts(self.inner, ptr, len);
         }
     }
+
+    /// EXPERIMENTAL: provide the backing memory for data blocks loaded by
+    /// iterator scans using these read options.
+    ///
+    /// When set, block-based table iterator scans (and MultiScan data-block
+    /// reads) bypass the data-block cache and place final data-block contents
+    /// in buffers obtained from `provider`, so the application controls where
+    /// that memory comes from (e.g. a pooled or arena allocator). Index and
+    /// filter blocks keep their normal block-cache behavior, point lookups
+    /// (`get`/`multi_get`) are unaffected, and mmap reads ignore the
+    /// provider. A failed allocation fails the read with a memory-limit
+    /// status.
+    ///
+    /// The provider is shared: pass the same `Arc` to as many read options as
+    /// needed. These read options keep it alive for every iterator created
+    /// from them.
+    pub fn set_read_scoped_block_buffer_provider(
+        &mut self,
+        provider: Arc<dyn ReadScopedBlockBufferProvider>,
+    ) {
+        let handle = BlockBufferProviderHandle::new(provider);
+        unsafe {
+            ffi::rust_rocksdb_readoptions_set_read_scoped_block_buffer_provider(
+                self.inner,
+                handle.inner,
+            );
+        }
+        self.block_buffer_provider = Some(handle);
+    }
 }
 
 impl Default for ReadOptions {
@@ -4621,6 +4656,7 @@ impl Default for ReadOptions {
                 iter_start_ts: None,
                 iterate_upper_bound: None,
                 iterate_lower_bound: None,
+                block_buffer_provider: None,
             }
         }
     }
