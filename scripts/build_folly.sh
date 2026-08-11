@@ -173,6 +173,16 @@ python3 "$ROCKSDB_DIR/build_tools/getdeps_fallback_mirror.py" \
 echo ">>> Building folly + dependencies into $SCRATCH_DIR..."
 echo "    (allow 15-30 minutes on a cold cache)"
 cd "$FOLLY_DIR"
+# getdeps' _apply_patchfile runs `git rev-parse --show-toplevel` from each
+# extracted dependency source dir and, if it resolves, applies the patch from
+# that "repo root". Tarball-extracted deps under $SCRATCH_DIR are not git
+# repos, so discovery walks up and finds THIS repository when the scratch dir
+# is inside it (the default), making `git apply` run against rust-rocksdb's
+# tree and fail (e.g. "Failed to apply patch to boost"). Capping repository
+# discovery at the scratch dir restores getdeps' apply-in-src_dir fallback.
+# Deps with their own .git (folly via shipit) are unaffected: their root is
+# found before the ceiling is reached.
+export GIT_CEILING_DIRECTORIES="$SCRATCH_DIR${GIT_CEILING_DIRECTORIES:+:$GIT_CEILING_DIRECTORIES}"
 GETDEPS_USE_WGET=1 \
 CXXFLAGS=" -DHAVE_CXX11_ATOMIC " \
 python3 build/fbcode_builder/getdeps.py \

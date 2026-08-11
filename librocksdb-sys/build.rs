@@ -914,7 +914,7 @@ mod vendor {
         #[cfg(feature = "io-uring")]
         {
             if _target.os == "linux" {
-                pkg_config::probe_library("liburing").unwrap_or_else(|e| {
+                let lib = pkg_config::probe_library("liburing").unwrap_or_else(|e| {
                     panic!(
                         "the `io-uring` feature was requested but pkg-config probe for \
                          `liburing` failed: {e}\n\
@@ -928,6 +928,15 @@ mod vendor {
                             and point PKG_CONFIG_PATH at the target sysroot's pkgconfig dir."
                     )
                 });
+                // Compile against the same liburing the probe linked. The
+                // probe's cargo directives only affect the link line; without
+                // the -I below, the C++ build silently falls back to the
+                // system headers, which breaks when PKG_CONFIG_PATH points at
+                // a newer liburing than the distro's (folly needs >= 2.15,
+                // see scripts/build_folly.sh).
+                for p in &lib.include_paths {
+                    _cfg.include(p);
+                }
                 _cfg.define("ROCKSDB_IOURING_PRESENT", Some("1"));
             }
         }
@@ -1473,6 +1482,17 @@ mod coroutines {
         let install_root = install_root();
 
         let folly = resolve_dep(&install_root, "folly");
+        // ROCKSDB_FOLLY_INSTALL_PATH is rerun-if-env-changed tracked, but its
+        // VALUE is stable across folly rebuilds (same path, new contents), so
+        // without this cargo reuses an rlib whose folly objects were compiled
+        // against the previous install and links it against the new one —
+        // symptom: glog ABI mismatches / undefined folly-dep symbols at the
+        // final bin link. Keying on libfolly.a's mtime forces a recompile
+        // whenever the install is rebuilt.
+        println!(
+            "cargo::rerun-if-changed={}",
+            folly.join("lib").join("libfolly.a").display()
+        );
         let boost = resolve_dep(&install_root, "boost");
         let fmt = resolve_dep(&install_root, "fmt");
         let glog = resolve_dep(&install_root, "glog");
