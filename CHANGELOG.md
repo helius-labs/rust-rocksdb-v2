@@ -2,6 +2,13 @@
 
 ## Unreleased (helius-labs fork)
 
+- feat: cover every `PerfContext` field with a `PerfMetric` variant — 36
+  fields missing from upstream's C metric enum (CPU-time nanos, iterator op
+  counts, block-cache hit/read breakdowns by block type, secondary-cache
+  stats, write-path scheduling/wait nanos, file-ingestion nanos, MultiScan
+  counters) are served through a local C API extension
+  (`rust_rocksdb_perfcontext_metric_ext`); `PerfContext::metric` dispatches
+  transparently. Per-level `PerfContextByLevel` remains unbound. (helius-labs)
 - feat: add `ReadOptions::set_read_scoped_block_buffer_provider` and the
   `ReadScopedBlockBufferProvider` trait / `BufferLease` type, exposing the
   EXPERIMENTAL C++ `ReadOptions::read_scoped_block_buffer_provider` option

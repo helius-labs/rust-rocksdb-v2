@@ -119,7 +119,16 @@ impl PerfContext {
     /// Returns value of a metric
     #[inline]
     pub fn metric(&self, id: PerfMetric) -> u64 {
-        unsafe { ffi::rocksdb_perfcontext_metric(self.inner, id as c_int) }
+        if (id as u32) < PERF_EXT_METRIC_BASE {
+            unsafe { ffi::rocksdb_perfcontext_metric(self.inner, id as c_int) }
+        } else {
+            // Extension metrics read the calling thread's perf context rather
+            // than going through `self.inner` (see c_api_extensions.h). That
+            // is the same object: `PerfContext` holds a raw pointer so it is
+            // `!Send`, and `rocksdb_perfcontext_create` wraps the creating
+            // thread's thread-local context.
+            unsafe { ffi::rust_rocksdb_perfcontext_metric_ext(id as u32) }
+        }
     }
 }
 

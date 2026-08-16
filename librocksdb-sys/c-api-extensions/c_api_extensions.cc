@@ -22,6 +22,7 @@
 #include "rocksdb/iterator.h"
 #include "rocksdb/listener.h"
 #include "rocksdb/options.h"
+#include "rocksdb/perf_context.h"
 #include "rocksdb/slice.h"
 #include "rocksdb/sst_file_reader.h"
 #include "rocksdb/sst_partitioner.h"
@@ -1258,4 +1259,89 @@ extern "C" void rust_rocksdb_readoptions_set_read_scoped_block_buffer_provider(
     rust_rocksdb_read_scoped_block_buffer_provider_t* provider) {
   reinterpret_cast<ReadOptions*>(options)->read_scoped_block_buffer_provider =
       provider != nullptr ? provider->rep : nullptr;
+}
+
+// Reads the calling thread's perf context; see the header comment on why
+// this takes no rocksdb_perfcontext_t handle. Unknown metrics return 0,
+// mirroring upstream rocksdb_perfcontext_metric.
+extern "C" uint64_t rust_rocksdb_perfcontext_metric_ext(uint32_t metric) {
+  const ROCKSDB_NAMESPACE::PerfContext* rep =
+      ROCKSDB_NAMESPACE::get_perf_context();
+  switch (metric) {
+    case rust_rocksdb_block_cache_index_hit_count:
+      return rep->block_cache_index_hit_count;
+    case rust_rocksdb_block_cache_standalone_handle_count:
+      return rep->block_cache_standalone_handle_count;
+    case rust_rocksdb_block_cache_real_handle_count:
+      return rep->block_cache_real_handle_count;
+    case rust_rocksdb_index_block_read_count:
+      return rep->index_block_read_count;
+    case rust_rocksdb_block_cache_filter_hit_count:
+      return rep->block_cache_filter_hit_count;
+    case rust_rocksdb_filter_block_read_count:
+      return rep->filter_block_read_count;
+    case rust_rocksdb_compression_dict_block_read_count:
+      return rep->compression_dict_block_read_count;
+    case rust_rocksdb_block_cache_index_read_byte:
+      return rep->block_cache_index_read_byte;
+    case rust_rocksdb_block_cache_filter_read_byte:
+      return rep->block_cache_filter_read_byte;
+    case rust_rocksdb_block_cache_compression_dict_read_byte:
+      return rep->block_cache_compression_dict_read_byte;
+    case rust_rocksdb_block_cache_read_byte:
+      return rep->block_cache_read_byte;
+    case rust_rocksdb_secondary_cache_hit_count:
+      return rep->secondary_cache_hit_count;
+    case rust_rocksdb_compressed_sec_cache_insert_real_count:
+      return rep->compressed_sec_cache_insert_real_count;
+    case rust_rocksdb_compressed_sec_cache_insert_dummy_count:
+      return rep->compressed_sec_cache_insert_dummy_count;
+    case rust_rocksdb_compressed_sec_cache_uncompressed_bytes:
+      return rep->compressed_sec_cache_uncompressed_bytes;
+    case rust_rocksdb_compressed_sec_cache_compressed_bytes:
+      return rep->compressed_sec_cache_compressed_bytes;
+    case rust_rocksdb_block_decompress_count:
+      return rep->block_decompress_count;
+    case rust_rocksdb_write_scheduling_flushes_compactions_time:
+      return rep->write_scheduling_flushes_compactions_time;
+    case rust_rocksdb_write_thread_wait_nanos:
+      return rep->write_thread_wait_nanos;
+    case rust_rocksdb_get_cpu_nanos:
+      return rep->get_cpu_nanos;
+    case rust_rocksdb_iter_next_cpu_nanos:
+      return rep->iter_next_cpu_nanos;
+    case rust_rocksdb_iter_prev_cpu_nanos:
+      return rep->iter_prev_cpu_nanos;
+    case rust_rocksdb_iter_seek_cpu_nanos:
+      return rep->iter_seek_cpu_nanos;
+    case rust_rocksdb_iter_next_count:
+      return rep->iter_next_count;
+    case rust_rocksdb_iter_prev_count:
+      return rep->iter_prev_count;
+    case rust_rocksdb_iter_seek_count:
+      return rep->iter_seek_count;
+    case rust_rocksdb_encrypt_data_nanos:
+      return rep->encrypt_data_nanos;
+    case rust_rocksdb_decrypt_data_nanos:
+      return rep->decrypt_data_nanos;
+    case rust_rocksdb_file_ingestion_nanos:
+      return rep->file_ingestion_nanos;
+    case rust_rocksdb_file_ingestion_blocking_live_writes_nanos:
+      return rep->file_ingestion_blocking_live_writes_nanos;
+    case rust_rocksdb_multiscan_prepare_count:
+      return rep->multiscan_prepare_count;
+    case rust_rocksdb_multiscan_blocks_prefetched:
+      return rep->multiscan_blocks_prefetched;
+    case rust_rocksdb_multiscan_blocks_from_cache:
+      return rep->multiscan_blocks_from_cache;
+    case rust_rocksdb_multiscan_prefetch_bytes:
+      return rep->multiscan_prefetch_bytes;
+    case rust_rocksdb_multiscan_io_requests:
+      return rep->multiscan_io_requests;
+    case rust_rocksdb_multiscan_io_coalesced_nonadjacent:
+      return rep->multiscan_io_coalesced_nonadjacent;
+    default:
+      break;
+  }
+  return 0;
 }

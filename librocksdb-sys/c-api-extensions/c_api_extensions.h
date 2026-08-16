@@ -396,6 +396,71 @@ rust_rocksdb_readoptions_set_read_scoped_block_buffer_provider(
     rocksdb_readoptions_t* options,
     rust_rocksdb_read_scoped_block_buffer_provider_t* provider);
 
+/* -------------------------------------------------------------------------
+ * Extended perf-context metrics
+ *
+ * C++ `PerfContext` (rocksdb/perf_context.h) has grown well past the metric
+ * enum in upstream `c.h`: 36 fields — CPU-time nanos, iterator op counts,
+ * block-cache hit/read breakdowns by block type, secondary-cache stats,
+ * write-path scheduling/wait nanos, file-ingestion nanos and the MultiScan
+ * counters — have no `rocksdb_perfcontext_metric` value. This enum covers
+ * exactly those fields, in `PerfContextBase` declaration order.
+ *
+ * Values start at 1024 so upstream can keep appending to its own enum
+ * (`rocksdb_total_metric_count` is 86 today) without ever colliding; when a
+ * field gains an upstream value, delete its entry here and the binding
+ * falls through to `rocksdb_perfcontext_metric` automatically.
+ *
+ * `rust_rocksdb_perfcontext_metric_ext` reads the CALLING THREAD's perf
+ * context (`rocksdb::get_perf_context()`), not a context handle: the layout
+ * of `rocksdb_perfcontext_t` is private to `db/c.cc` (same constraint as the
+ * SstFileReader iterator above), and upstream's `rocksdb_perfcontext_create`
+ * merely wraps the calling thread's `get_perf_context()` pointer — so for
+ * any handle used on the thread that created it, the two are the same
+ * object. Returns 0 for unknown metric values, mirroring upstream.
+ * ------------------------------------------------------------------------- */
+enum {
+  rust_rocksdb_block_cache_index_hit_count = 1024,
+  rust_rocksdb_block_cache_standalone_handle_count,
+  rust_rocksdb_block_cache_real_handle_count,
+  rust_rocksdb_index_block_read_count,
+  rust_rocksdb_block_cache_filter_hit_count,
+  rust_rocksdb_filter_block_read_count,
+  rust_rocksdb_compression_dict_block_read_count,
+  rust_rocksdb_block_cache_index_read_byte,
+  rust_rocksdb_block_cache_filter_read_byte,
+  rust_rocksdb_block_cache_compression_dict_read_byte,
+  rust_rocksdb_block_cache_read_byte,
+  rust_rocksdb_secondary_cache_hit_count,
+  rust_rocksdb_compressed_sec_cache_insert_real_count,
+  rust_rocksdb_compressed_sec_cache_insert_dummy_count,
+  rust_rocksdb_compressed_sec_cache_uncompressed_bytes,
+  rust_rocksdb_compressed_sec_cache_compressed_bytes,
+  rust_rocksdb_block_decompress_count,
+  rust_rocksdb_write_scheduling_flushes_compactions_time,
+  rust_rocksdb_write_thread_wait_nanos,
+  rust_rocksdb_get_cpu_nanos,
+  rust_rocksdb_iter_next_cpu_nanos,
+  rust_rocksdb_iter_prev_cpu_nanos,
+  rust_rocksdb_iter_seek_cpu_nanos,
+  rust_rocksdb_iter_next_count,
+  rust_rocksdb_iter_prev_count,
+  rust_rocksdb_iter_seek_count,
+  rust_rocksdb_encrypt_data_nanos,
+  rust_rocksdb_decrypt_data_nanos,
+  rust_rocksdb_file_ingestion_nanos,
+  rust_rocksdb_file_ingestion_blocking_live_writes_nanos,
+  rust_rocksdb_multiscan_prepare_count,
+  rust_rocksdb_multiscan_blocks_prefetched,
+  rust_rocksdb_multiscan_blocks_from_cache,
+  rust_rocksdb_multiscan_prefetch_bytes,
+  rust_rocksdb_multiscan_io_requests,
+  rust_rocksdb_multiscan_io_coalesced_nonadjacent,
+};
+
+extern ROCKSDB_LIBRARY_API uint64_t
+rust_rocksdb_perfcontext_metric_ext(uint32_t metric);
+
 #ifdef __cplusplus
 }
 #endif
