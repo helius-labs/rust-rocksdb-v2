@@ -82,7 +82,7 @@ pub enum StatsLevel {
     /// Disable all metrics
     DisableAll = 0,
     /// Disable timer stats, and skip histogram stats
-    ExceptHistogramOrTimers = 2,
+    ExceptHistogramOrTimers = 1,
     /// Skip timer stats
     ExceptTimers,
     /// Collect all stats except time inside mutex lock AND time spent on
@@ -161,6 +161,15 @@ impl Drop for HistogramData {
 
 #[test]
 fn sanity_checks() {
+    // Keep these FFI discriminants in sync with rocksdb/c.h. ExceptTickers is
+    // an alias of DisableAll in RocksDB, so it does not consume value 1.
+    assert_eq!(StatsLevel::DisableAll as u8, 0);
+    assert_eq!(StatsLevel::ExceptHistogramOrTimers as u8, 1);
+    assert_eq!(StatsLevel::ExceptTimers as u8, 2);
+    assert_eq!(StatsLevel::ExceptDetailedTimers as u8, 3);
+    assert_eq!(StatsLevel::ExceptTimeForMutex as u8, 4);
+    assert_eq!(StatsLevel::All as u8, 5);
+
     let want = "rocksdb.async.read.bytes";
     assert_eq!(want, Histogram::AsyncReadBytes.name());
 
