@@ -387,31 +387,33 @@ extern "C" unsigned char rust_rocksdb_options_get_open_files_async(
 // -----------------------------------------------------------------------------
 
 struct rust_rocksdb_pinnable_batch_t {
+  // Number of keys in the most recent fill. Refills only grow the vectors
+  // below (so their buffers survive across fills); indexes at or past `len`
+  // are out of range regardless of vector size.
+  size_t len = 0;
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
   std::vector<rocksdb_pinnableslice_t*> system_values;
 #else
+  // Direct MultiGet targets, statuses[i] classifying values[i]. Vendored
+  // refills Reset() each slice in place, so the internal buffer capacity a
+  // copied (non-pinned) value allocated is retained for the next fill.
   std::vector<PinnableSlice> values;
-  std::vector<size_t> result_indexes;
+  std::vector<Status> statuses;
 #endif
   std::unordered_map<size_t, std::string> errors;
 
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
-  ~rust_rocksdb_pinnable_batch_t() {
-    for (auto* value : system_values) {
+  void release_system_values() {
+    for (auto*& value : system_values) {
       if (value != nullptr) {
         rocksdb_pinnableslice_destroy(value);
+        value = nullptr;
       }
     }
   }
+  ~rust_rocksdb_pinnable_batch_t() { release_system_values(); }
 #endif
 };
-
-#ifndef RUST_ROCKSDB_SYSTEM_BACKEND
-static constexpr size_t kRustRocksDbBatchNotFound =
-    std::numeric_limits<size_t>::max();
-static constexpr size_t kRustRocksDbBatchError =
-    std::numeric_limits<size_t>::max() - 1;
-#endif
 
 #ifndef RUST_ROCKSDB_SYSTEM_BACKEND
 static DB* RustRocksDbRep(rocksdb_t* db) {
@@ -424,15 +426,39 @@ static ColumnFamilyHandle* RustRocksDbColumnFamilyRep(
 }
 #endif
 
-extern "C" rust_rocksdb_pinnable_batch_t*
-rust_rocksdb_batched_multi_get_pinned(
-    rocksdb_t* db, const rocksdb_readoptions_t* options,
+extern "C" rust_rocksdb_pinnable_batch_t* rust_rocksdb_pinnable_batch_create(
+    void) {
+  return new rust_rocksdb_pinnable_batch_t();
+}
+
+extern "C" void rust_rocksdb_pinnable_batch_reset(
+    rust_rocksdb_pinnable_batch_t* batch) {
+  batch->len = 0;
+  batch->errors.clear();
+#ifdef RUST_ROCKSDB_SYSTEM_BACKEND
+  batch->release_system_values();
+#else
+  for (auto& value : batch->values) {
+    value.Reset();
+  }
+#endif
+}
+
+extern "C" void rust_rocksdb_batched_multi_get_pinned_into(
+    rust_rocksdb_pinnable_batch_t* batch, rocksdb_t* db,
+    const rocksdb_readoptions_t* options,
     rocksdb_column_family_handle_t* column_family, size_t num_keys,
     const rocksdb_slice_t* keys, unsigned char sorted_input, char** errptr) {
   try {
-    auto batch = std::make_unique<rust_rocksdb_pinnable_batch_t>();
+    // Unpin the previous fill's values first; on any failure below the batch
+    // is left reset (len 0) rather than half-filled.
+    rust_rocksdb_pinnable_batch_reset(batch);
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
-    batch->system_values.resize(num_keys, nullptr);
+    // The public C API cannot refill a rocksdb_pinnableslice_t in place, so
+    // the System backend refills without cross-call reuse.
+    if (batch->system_values.size() < num_keys) {
+      batch->system_values.resize(num_keys, nullptr);
+    }
     std::vector<char*> errors(num_keys, nullptr);
     // Releases every per-key error string still held in `errors`, including
     // when the drain loop below throws partway through. Destroying the vector
@@ -470,9 +496,16 @@ rust_rocksdb_batched_multi_get_pinned(
       }
     }
 #else
-    batch->result_indexes.resize(num_keys, kRustRocksDbBatchNotFound);
+    // Grow-only, so the slices (and their copied-value buffer capacity) and
+    // statuses survive across fills.
+    if (batch->values.size() < num_keys) {
+      batch->values.resize(num_keys);
+    }
+    if (batch->statuses.size() < num_keys) {
+      batch->statuses.resize(num_keys);
+    }
     if (num_keys == 0) {
-      return batch.release();
+      return;
     }
 
     DB* db_rep = RustRocksDbRep(db);
@@ -481,46 +514,60 @@ rust_rocksdb_batched_multi_get_pinned(
                                  : RustRocksDbColumnFamilyRep(column_family);
     const auto* read_options = reinterpret_cast<const ReadOptions*>(options);
     const auto* key_slices = reinterpret_cast<const Slice*>(keys);
-    std::vector<PinnableSlice> values(num_keys);
-    std::vector<Status> statuses(num_keys);
 
     db_rep->MultiGet(*read_options, column_family_rep, num_keys, key_slices,
-                     values.data(), statuses.data(), sorted_input != 0);
+                     batch->values.data(), batch->statuses.data(),
+                     sorted_input != 0);
 
-    size_t hit_count = 0;
-    for (const auto& status : statuses) {
-      if (status.ok()) {
-        ++hit_count;
-      }
-    }
-    batch->values.reserve(hit_count);
     for (size_t i = 0; i < num_keys; ++i) {
-      if (statuses[i].ok()) {
-        batch->result_indexes[i] = batch->values.size();
-        batch->values.emplace_back(std::move(values[i]));
-      } else if (!statuses[i].IsNotFound()) {
-        batch->result_indexes[i] = kRustRocksDbBatchError;
-        batch->errors.emplace(i, statuses[i].ToString());
+      const Status& status = batch->statuses[i];
+      if (!status.ok() && !status.IsNotFound()) {
+        batch->errors.emplace(i, status.ToString());
       }
     }
 #endif
-    return batch.release();
+    batch->len = num_keys;
+  } catch (const std::exception& error) {
+    RustSaveMessage(errptr, error.what());
+  } catch (...) {
+    RustSaveMessage(errptr, "unknown C++ exception in pinned MultiGet");
+  }
+}
+
+extern "C" rust_rocksdb_pinnable_batch_t*
+rust_rocksdb_batched_multi_get_pinned(
+    rocksdb_t* db, const rocksdb_readoptions_t* options,
+    rocksdb_column_family_handle_t* column_family, size_t num_keys,
+    const rocksdb_slice_t* keys, unsigned char sorted_input, char** errptr) {
+  rust_rocksdb_pinnable_batch_t* batch;
+  try {
+    batch = rust_rocksdb_pinnable_batch_create();
   } catch (const std::exception& error) {
     RustSaveMessage(errptr, error.what());
     return nullptr;
-  } catch (...) {
-    RustSaveMessage(errptr, "unknown C++ exception in pinned MultiGet");
+  }
+  char* fill_error = nullptr;
+  rust_rocksdb_batched_multi_get_pinned_into(
+      batch, db, options, column_family, num_keys, keys, sorted_input,
+      &fill_error);
+  if (fill_error != nullptr) {
+    rust_rocksdb_pinnable_batch_destroy(batch);
+    if (errptr != nullptr) {
+      if (*errptr != nullptr) {
+        std::free(*errptr);
+      }
+      *errptr = fill_error;
+    } else {
+      std::free(fill_error);
+    }
     return nullptr;
   }
+  return batch;
 }
 
 extern "C" size_t rust_rocksdb_pinnable_batch_len(
     const rust_rocksdb_pinnable_batch_t* batch) {
-#ifdef RUST_ROCKSDB_SYSTEM_BACKEND
-  return batch->system_values.size();
-#else
-  return batch->result_indexes.size();
-#endif
+  return batch->len;
 }
 
 extern "C" unsigned char rust_rocksdb_pinnable_batch_get(
@@ -537,7 +584,7 @@ extern "C" unsigned char rust_rocksdb_pinnable_batch_get(
   // `std::vector::operator[]` feeding a pointer and length straight into
   // `slice::from_raw_parts` on the Rust side.
 #ifdef RUST_ROCKSDB_SYSTEM_BACKEND
-  if (index >= batch->system_values.size()) {
+  if (index >= batch->len || index >= batch->system_values.size()) {
     return rust_rocksdb_pinnable_batch_out_of_range;
   }
   const auto error_iter = batch->errors.find(index);
@@ -553,29 +600,26 @@ extern "C" unsigned char rust_rocksdb_pinnable_batch_get(
       rocksdb_pinnableslice_value(batch->system_values[index], value_len);
   return rust_rocksdb_pinnable_batch_found;
 #else
-  if (index >= batch->result_indexes.size()) {
+  if (index >= batch->len || index >= batch->values.size() ||
+      index >= batch->statuses.size()) {
     return rust_rocksdb_pinnable_batch_out_of_range;
   }
-  const size_t result_index = batch->result_indexes[index];
-  if (result_index == kRustRocksDbBatchNotFound) {
+  const Status& status = batch->statuses[index];
+  if (status.ok()) {
+    *value = batch->values[index].data();
+    *value_len = batch->values[index].size();
+    return rust_rocksdb_pinnable_batch_found;
+  }
+  if (status.IsNotFound()) {
     return rust_rocksdb_pinnable_batch_not_found;
   }
-  if (result_index == kRustRocksDbBatchError) {
-    const auto error_iter = batch->errors.find(index);
-    if (error_iter == batch->errors.end()) {
-      return rust_rocksdb_pinnable_batch_out_of_range;
-    }
-    *error = error_iter->second.data();
-    *error_len = error_iter->second.size();
-    return rust_rocksdb_pinnable_batch_error;
-  }
-  if (result_index >= batch->values.size()) {
+  const auto error_iter = batch->errors.find(index);
+  if (error_iter == batch->errors.end()) {
     return rust_rocksdb_pinnable_batch_out_of_range;
   }
-
-  *value = batch->values[result_index].data();
-  *value_len = batch->values[result_index].size();
-  return rust_rocksdb_pinnable_batch_found;
+  *error = error_iter->second.data();
+  *error_len = error_iter->second.size();
+  return rust_rocksdb_pinnable_batch_error;
 #endif
 }
 

@@ -68,6 +68,26 @@ rust_rocksdb_batched_multi_get_pinned(
     rocksdb_t* db, const rocksdb_readoptions_t* options,
     rocksdb_column_family_handle_t* column_family, size_t num_keys,
     const rocksdb_slice_t* keys, unsigned char sorted_input, char** errptr);
+/* Creates an empty batch for `rust_rocksdb_batched_multi_get_pinned_into`. */
+extern ROCKSDB_LIBRARY_API rust_rocksdb_pinnable_batch_t*
+rust_rocksdb_pinnable_batch_create(void);
+/* Releases the batch's values (unpinning any block-cache handles they held)
+   while retaining its internal buffers for the next fill; the length becomes
+   0. */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_pinnable_batch_reset(
+    rust_rocksdb_pinnable_batch_t* batch);
+/* Refills `batch` in place with the results for `keys`, mirroring
+   `rust_rocksdb_batched_multi_get_pinned` but reusing the batch's internal
+   buffers across calls on the vendored backend (the System backend refills
+   without reuse — the public C API cannot reset a rocksdb_pinnableslice_t).
+   Borrows handed out by `rust_rocksdb_pinnable_batch_get` are invalidated.
+   On error a message is stored in `*errptr` and the batch is left reset
+   (length 0). A null `column_family` selects the default column family. */
+extern ROCKSDB_LIBRARY_API void rust_rocksdb_batched_multi_get_pinned_into(
+    rust_rocksdb_pinnable_batch_t* batch, rocksdb_t* db,
+    const rocksdb_readoptions_t* options,
+    rocksdb_column_family_handle_t* column_family, size_t num_keys,
+    const rocksdb_slice_t* keys, unsigned char sorted_input, char** errptr);
 extern ROCKSDB_LIBRARY_API size_t rust_rocksdb_pinnable_batch_len(
     const rust_rocksdb_pinnable_batch_t* batch);
 /* `value` and `error` are borrowed from `batch` and dangle once it is

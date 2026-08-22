@@ -33,6 +33,7 @@ use crate::ffi_util::CSlice;
 use crate::{
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
     DBPinnableBatch, DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator,
+    ReusablePinnableBatch,
     DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IngestExternalFileOptions,
     IteratorMode, Options, ReadOptions, ReusablePinnableSlice, SnapshotWithThreadMode,
     WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
@@ -2094,6 +2095,61 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         }
         let default_cf = OwnedColumnFamilyHandle::default_for(self.inner.inner());
         self.batched_multi_get_pinned_inner(default_cf.inner, &key_slices, sorted_input, readopts)
+    }
+
+    /// Refills a caller-owned [`ReusablePinnableBatch`] with pinned results
+    /// for `keys` in one column family, reusing the batch's native buffers
+    /// and its key-slice scratch — steady-state, one native MultiGet with no
+    /// per-call allocation on either side of the FFI boundary (vendored
+    /// backend; the System backend refills without cross-call reuse).
+    ///
+    /// Results stay in input order, including duplicates; read them back with
+    /// [`ReusablePinnableBatch::get`] or [`ReusablePinnableBatch::iter`]. Set
+    /// `sorted_input` only when the keys are sorted according to the column
+    /// family's comparator. On error the batch is left reset (empty). See
+    /// [`ReusablePinnableBatch`] for the batch's lifetime contract.
+    pub fn batched_multi_get_pinned_into_cf_opt<K: AsRef<[u8]>>(
+        &self,
+        cf: &impl AsColumnFamilyRef,
+        keys: &[K],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+        batch: &mut ReusablePinnableBatch,
+    ) -> Result<(), Error> {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        // The native fill resets the batch up front; mirror that on the Rust
+        // side so an early error can't leave a stale length behind.
+        batch.len = 0;
+        batch.key_slices.clear();
+        batch.key_slices.extend(keys.iter().map(|key| {
+            let key = key.as_ref();
+            ffi::rocksdb_slice_t {
+                data: key.as_ptr() as *const c_char,
+                size: key.len(),
+            }
+        }));
+
+        unsafe {
+            ffi_try!(ffi::rust_rocksdb_batched_multi_get_pinned_into(
+                batch.inner.as_ptr(),
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                batch.key_slices.len(),
+                batch.key_slices.as_ptr(),
+                c_uchar::from(sorted_input),
+            ));
+        }
+
+        batch.len = keys.len();
+        Ok(())
     }
 
     fn create_pinnable_batch<'a>(

@@ -147,7 +147,7 @@ pub use crate::{
         Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
         UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
     },
-    db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter},
+    db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter, ReusablePinnableBatch},
     db_pinnable_slice::DBPinnableSlice,
     reusable_pinnable_slice::ReusablePinnableSlice,
     env::Env,
