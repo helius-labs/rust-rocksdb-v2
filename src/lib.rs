@@ -102,6 +102,7 @@ mod db_iterator;
 mod db_options;
 mod db_pinnable_batch;
 mod db_pinnable_slice;
+mod reusable_pinnable_slice;
 mod env;
 pub mod event_listener;
 mod iter_range;
@@ -148,6 +149,7 @@ pub use crate::{
     },
     db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter},
     db_pinnable_slice::DBPinnableSlice,
+    reusable_pinnable_slice::ReusablePinnableSlice,
     env::Env,
     ffi_util::{CSlice, CStrLike},
     iter_range::{IterateBounds, PrefixRange},

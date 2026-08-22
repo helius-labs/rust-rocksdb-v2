@@ -34,8 +34,8 @@ use crate::{
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
     DBPinnableBatch, DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator,
     DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IngestExternalFileOptions,
-    IteratorMode, Options, ReadOptions, SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch,
-    WriteBatchWithIndex, WriteOptions,
+    IteratorMode, Options, ReadOptions, ReusablePinnableSlice, SnapshotWithThreadMode,
+    WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
@@ -1367,6 +1367,48 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
         key: K,
     ) -> Result<Option<DBPinnableSlice<'_>>, Error> {
         DEFAULT_READ_OPTS.with(|opts| self.get_pinned_cf_opt(cf, key, opts))
+    }
+
+    /// Reads a value into a caller-owned [`ReusablePinnableSlice`], avoiding
+    /// the per-call native slice allocation of
+    /// [`get_pinned_cf_opt`](#method.get_pinned_cf_opt).
+    ///
+    /// The slice is reset and refilled; on a hit the value is returned as a
+    /// borrow of both the slice and this DB, so it must be released before
+    /// the next fill. Returns `Ok(None)` when the key does not exist (the
+    /// slice is left empty). See [`ReusablePinnableSlice`] for the slice's
+    /// lifetime contract.
+    pub fn get_pinned_into_cf_opt<'a, K: AsRef<[u8]>>(
+        &'a self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+        slice: &'a mut ReusablePinnableSlice,
+    ) -> Result<Option<&'a [u8]>, Error> {
+        if readopts.inner.is_null() {
+            return Err(Error::new(
+                "Unable to create RocksDB read options. This is a fairly trivial call, and its \
+                 failure may be indicative of a mis-compiled or mis-loaded RocksDB library."
+                    .to_owned(),
+            ));
+        }
+
+        let key = key.as_ref();
+        unsafe {
+            let found = ffi_try!(ffi::rocksdb_get_pinned_cf_into(
+                self.inner.inner(),
+                readopts.inner,
+                cf.inner(),
+                key.as_ptr() as *const c_char,
+                key.len() as size_t,
+                slice.as_mut_ptr(),
+            ));
+            if found == 0 {
+                Ok(None)
+            } else {
+                Ok(Some(slice.value()))
+            }
+        }
     }
 
     /// Read a value directly into a caller-provided buffer, avoiding memory allocation.
