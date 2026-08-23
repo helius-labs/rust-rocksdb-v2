@@ -14,7 +14,7 @@
 
 use crate::ffi;
 use libc::size_t;
-use std::{ptr::NonNull, slice};
+use std::{marker::PhantomData, ops::Deref, ptr::NonNull, slice};
 
 /// A caller-owned `PinnableSlice` that survives across point lookups.
 ///
@@ -40,6 +40,16 @@ use std::{ptr::NonNull, slice};
 /// [`get_pinned_into_cf_opt`]: crate::DB::get_pinned_into_cf_opt
 pub struct ReusablePinnableSlice {
     ptr: NonNull<ffi::rocksdb_pinnableslice_t>,
+}
+
+/// A found value that borrows both its reusable slice and the DB that owns
+/// any pinned cache handle.
+///
+/// The value is released when the guard is dropped. Misses do not construct a
+/// guard because the reusable slice is already empty in that case.
+pub struct ReusablePinnableSliceGuard<'slice, 'db> {
+    slice: &'slice mut ReusablePinnableSlice,
+    db: PhantomData<&'db ()>,
 }
 
 // SAFETY: the native slice is only mutated through `&mut self` (fills and
@@ -84,6 +94,40 @@ impl ReusablePinnableSlice {
 
     pub(crate) fn as_mut_ptr(&mut self) -> *mut ffi::rocksdb_pinnableslice_t {
         self.ptr.as_ptr()
+    }
+}
+
+impl<'slice, 'db> ReusablePinnableSliceGuard<'slice, 'db> {
+    pub(crate) fn new(slice: &'slice mut ReusablePinnableSlice) -> Self {
+        Self {
+            slice,
+            db: PhantomData,
+        }
+    }
+
+    /// Returns the found value.
+    pub fn value(&self) -> &[u8] {
+        self.slice.value()
+    }
+}
+
+impl AsRef<[u8]> for ReusablePinnableSliceGuard<'_, '_> {
+    fn as_ref(&self) -> &[u8] {
+        self.value()
+    }
+}
+
+impl Deref for ReusablePinnableSliceGuard<'_, '_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        self.value()
+    }
+}
+
+impl Drop for ReusablePinnableSliceGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.slice.reset();
     }
 }
 

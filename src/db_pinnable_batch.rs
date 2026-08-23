@@ -194,6 +194,17 @@ pub struct ReusablePinnableBatch {
     pub(crate) len: usize,
 }
 
+/// A filled reusable batch that borrows both its scratch storage and the DB
+/// that owns any pinned cache handles.
+///
+/// Values are released when the guard is dropped. This makes the DB lifetime
+/// contract of [`ReusablePinnableBatch`] enforceable by safe Rust while still
+/// allowing the empty scratch allocation to live in long-lived state.
+pub struct ReusablePinnableBatchGuard<'batch, 'db> {
+    batch: &'batch mut ReusablePinnableBatch,
+    db: PhantomData<&'db ()>,
+}
+
 // SAFETY: the native batch is only mutated through `&mut self` (fills and
 // resets); `&self` access only reads stable pointers and lengths.
 unsafe impl Send for ReusablePinnableBatch {}
@@ -246,6 +257,43 @@ impl ReusablePinnableBatch {
     pub fn iter(&self) -> impl ExactSizeIterator<Item = Result<Option<&[u8]>, Error>> + '_ {
         // SAFETY: as in `get`; every index below `self.len` is in bounds.
         (0..self.len).map(move |index| unsafe { get_entry(self.inner.as_ptr(), index) })
+    }
+}
+
+impl<'batch, 'db> ReusablePinnableBatchGuard<'batch, 'db> {
+    pub(crate) fn new(batch: &'batch mut ReusablePinnableBatch) -> Self {
+        Self {
+            batch,
+            db: PhantomData,
+        }
+    }
+
+    /// Returns the number of results in the guarded fill.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.batch.len()
+    }
+
+    /// Returns whether the guarded fill contains no results.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.batch.is_empty()
+    }
+
+    /// Returns one result by input index.
+    pub fn get(&self, index: usize) -> Option<Result<Option<&[u8]>, Error>> {
+        self.batch.get(index)
+    }
+
+    /// Iterates over results in input order.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = Result<Option<&[u8]>, Error>> + '_ {
+        self.batch.iter()
+    }
+}
+
+impl Drop for ReusablePinnableBatchGuard<'_, '_> {
+    fn drop(&mut self) {
+        self.batch.reset();
     }
 }
 

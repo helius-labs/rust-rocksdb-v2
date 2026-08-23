@@ -147,9 +147,11 @@ pub use crate::{
         Options, PlainTableFactoryOptions, RateLimiterMode, ReadOptions, ReadTier,
         UniversalCompactOptions, UniversalCompactionStopStyle, WaitForCompactOptions, WriteOptions,
     },
-    db_pinnable_batch::{DBPinnableBatch, DBPinnableBatchIter, ReusablePinnableBatch},
+    db_pinnable_batch::{
+        DBPinnableBatch, DBPinnableBatchIter, ReusablePinnableBatch, ReusablePinnableBatchGuard,
+    },
     db_pinnable_slice::DBPinnableSlice,
-    reusable_pinnable_slice::ReusablePinnableSlice,
+    reusable_pinnable_slice::{ReusablePinnableSlice, ReusablePinnableSliceGuard},
     env::Env,
     ffi_util::{CSlice, CStrLike},
     iter_range::{IterateBounds, PrefixRange},

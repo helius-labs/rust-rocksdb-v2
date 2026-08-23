@@ -33,9 +33,9 @@ use crate::ffi_util::CSlice;
 use crate::{
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
     DBPinnableBatch, DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator,
-    ReusablePinnableBatch,
     DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IngestExternalFileOptions,
-    IteratorMode, Options, ReadOptions, ReusablePinnableSlice, SnapshotWithThreadMode,
+    IteratorMode, Options, ReadOptions, ReusablePinnableBatch, ReusablePinnableBatchGuard,
+    ReusablePinnableSlice, ReusablePinnableSliceGuard, SnapshotWithThreadMode,
     WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
@@ -1379,7 +1379,14 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// the next fill. Returns `Ok(None)` when the key does not exist (the
     /// slice is left empty). See [`ReusablePinnableSlice`] for the slice's
     /// lifetime contract.
-    pub fn get_pinned_into_cf_opt<'a, K: AsRef<[u8]>>(
+    ///
+    /// # Safety
+    ///
+    /// A successful fill may retain handles owned by `self`. The caller must
+    /// reset or drop `slice` before this DB is closed. Prefer
+    /// [`get_pinned_into_cf_opt_guarded`](Self::get_pinned_into_cf_opt_guarded),
+    /// which enforces that ordering and resets automatically.
+    pub unsafe fn get_pinned_into_cf_opt<'a, K: AsRef<[u8]>>(
         &'a self,
         cf: &impl AsColumnFamilyRef,
         key: K,
@@ -1409,6 +1416,34 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
             } else {
                 Ok(Some(slice.value()))
             }
+        }
+    }
+
+    /// Reads a pinned value into reusable storage and returns a guard that
+    /// keeps this DB borrowed until the value is released.
+    pub fn get_pinned_into_cf_opt_guarded<'slice, 'db, K: AsRef<[u8]>>(
+        &'db self,
+        cf: &impl AsColumnFamilyRef,
+        key: K,
+        readopts: &ReadOptions,
+        slice: &'slice mut ReusablePinnableSlice,
+    ) -> Result<Option<ReusablePinnableSliceGuard<'slice, 'db>>, Error> {
+        // SAFETY: the returned guard borrows `self` and resets `slice` before
+        // releasing that borrow.
+        let found = match unsafe { self.get_pinned_into_cf_opt(cf, key, readopts, slice) } {
+            Ok(value) => value.is_some(),
+            Err(error) => {
+                slice.reset();
+                return Err(error);
+            }
+        };
+        if found {
+            Ok(Some(ReusablePinnableSliceGuard::new(slice)))
+        } else {
+            // The raw lookup resets on a miss. Keep that postcondition
+            // explicit for the safe API.
+            slice.reset();
+            Ok(None)
         }
     }
 
@@ -2108,7 +2143,14 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// `sorted_input` only when the keys are sorted according to the column
     /// family's comparator. On error the batch is left reset (empty). See
     /// [`ReusablePinnableBatch`] for the batch's lifetime contract.
-    pub fn batched_multi_get_pinned_into_cf_opt<K: AsRef<[u8]>>(
+    ///
+    /// # Safety
+    ///
+    /// A successful fill may retain handles owned by `self`. The caller must
+    /// reset or drop `batch` before this DB is closed. Prefer
+    /// [`batched_multi_get_pinned_into_cf_opt_guarded`](Self::batched_multi_get_pinned_into_cf_opt_guarded),
+    /// which enforces that ordering and resets automatically.
+    pub unsafe fn batched_multi_get_pinned_into_cf_opt<K: AsRef<[u8]>>(
         &self,
         cf: &impl AsColumnFamilyRef,
         keys: &[K],
@@ -2150,6 +2192,27 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
 
         batch.len = keys.len();
         Ok(())
+    }
+
+    /// Refills a reusable pinned batch and returns a guard that keeps this DB
+    /// borrowed until every result is released.
+    pub fn batched_multi_get_pinned_into_cf_opt_guarded<'batch, 'db, K: AsRef<[u8]>>(
+        &'db self,
+        cf: &impl AsColumnFamilyRef,
+        keys: &[K],
+        sorted_input: bool,
+        readopts: &ReadOptions,
+        batch: &'batch mut ReusablePinnableBatch,
+    ) -> Result<ReusablePinnableBatchGuard<'batch, 'db>, Error> {
+        // SAFETY: the returned guard borrows `self` and resets `batch` before
+        // releasing that borrow.
+        if let Err(error) = unsafe {
+            self.batched_multi_get_pinned_into_cf_opt(cf, keys, sorted_input, readopts, batch)
+        } {
+            batch.reset();
+            return Err(error);
+        }
+        Ok(ReusablePinnableBatchGuard::new(batch))
     }
 
     fn create_pinnable_batch<'a>(

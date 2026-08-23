@@ -25,15 +25,12 @@ fn open_db(path: &DBPath) -> DB {
     DB::open_cf(&opts, path, ["default"]).unwrap()
 }
 
-fn fill(
-    db: &DB,
-    keys: &[&[u8]],
-    batch: &mut ReusablePinnableBatch,
-) -> Vec<Option<Vec<u8>>> {
+fn fill(db: &DB, keys: &[&[u8]], batch: &mut ReusablePinnableBatch) -> Vec<Option<Vec<u8>>> {
     let cf = db.cf_handle("default").unwrap();
     let readopts = ReadOptions::default();
-    db.batched_multi_get_pinned_into_cf_opt(&cf, keys, false, &readopts, batch)
-        .unwrap();
+    // SAFETY: every caller declares `batch` after `db` and either refills,
+    // resets, or drops it before the DB is dropped.
+    unsafe { db.batched_multi_get_pinned_into_cf_opt(&cf, keys, false, &readopts, batch) }.unwrap();
     assert_eq!(batch.len(), keys.len());
     batch
         .iter()
@@ -107,6 +104,34 @@ fn reset_releases_values() {
     // Still refillable after a reset.
     let values = fill(&db, &[b"k"], &mut batch);
     assert_eq!(values, vec![Some(b"v".to_vec())]);
+}
+
+#[test]
+fn guard_resets_values_on_drop() {
+    let path = DBPath::new("_rust_rocksdb_reusable_batch_guard");
+    let db = open_db(&path);
+    db.put(b"k", b"v").unwrap();
+
+    let cf = db.cf_handle("default").unwrap();
+    let readopts = ReadOptions::default();
+    let mut batch = ReusablePinnableBatch::new();
+
+    {
+        let guard = db
+            .batched_multi_get_pinned_into_cf_opt_guarded(
+                &cf,
+                &[b"k"],
+                false,
+                &readopts,
+                &mut batch,
+            )
+            .unwrap();
+        assert_eq!(guard.len(), 1);
+        assert_eq!(guard.get(0).unwrap().unwrap(), Some(b"v".as_ref()));
+    }
+
+    assert!(batch.is_empty());
+    assert!(batch.get(0).is_none());
 }
 
 #[test]
