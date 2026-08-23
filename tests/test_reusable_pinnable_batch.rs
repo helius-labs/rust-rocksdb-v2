@@ -25,15 +25,12 @@ fn open_db(path: &DBPath) -> DB {
     DB::open_cf(&opts, path, ["default"]).unwrap()
 }
 
-fn fill(
-    db: &DB,
-    keys: &[&[u8]],
-    batch: &mut ReusablePinnableBatch,
-) -> Vec<Option<Vec<u8>>> {
+fn fill(db: &DB, keys: &[&[u8]], batch: &mut ReusablePinnableBatch) -> Vec<Option<Vec<u8>>> {
     let cf = db.cf_handle("default").unwrap();
     let readopts = ReadOptions::default();
-    db.batched_multi_get_pinned_into_cf_opt(&cf, keys, false, &readopts, batch)
-        .unwrap();
+    // SAFETY: every test owns both `db` and the batch, and drops the batch
+    // before the DB.
+    unsafe { db.batched_multi_get_pinned_into_cf_opt(&cf, keys, false, &readopts, batch) }.unwrap();
     assert_eq!(batch.len(), keys.len());
     batch
         .iter()

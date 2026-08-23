@@ -38,21 +38,18 @@ fn reuse_across_lookups() {
     let readopts = ReadOptions::default();
     let mut slice = ReusablePinnableSlice::new();
 
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"k1", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"k1", &readopts, &mut slice) } }.unwrap();
     assert_eq!(value, Some(b"value1".as_ref()));
     assert_eq!(slice.value(), b"value1");
 
     // Refill with a longer value, then a shorter one.
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"k2", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"k2", &readopts, &mut slice) } }.unwrap();
     assert_eq!(value, Some(b"a-longer-second-value".as_ref()));
 
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"k3", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"k3", &readopts, &mut slice) } }.unwrap();
     assert_eq!(value, Some(b"value3".as_ref()));
 }
 
@@ -70,15 +67,15 @@ fn miss_clears_previous_value() {
     let readopts = ReadOptions::default();
     let mut slice = ReusablePinnableSlice::new();
 
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"present", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"present", &readopts, &mut slice) } }
+            .unwrap();
     assert_eq!(value, Some(b"value".as_ref()));
 
     // A miss returns None and must not leave the previous value readable.
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"absent", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"absent", &readopts, &mut slice) } }
+            .unwrap();
     assert_eq!(value, None);
     assert_eq!(slice.value(), b"");
 }
@@ -99,16 +96,14 @@ fn reset_and_empty_states() {
     assert_eq!(slice.value(), b"");
 
     let readopts = ReadOptions::default();
-    db.get_pinned_into_cf_opt(&cf, b"key", &readopts, &mut slice)
-        .unwrap();
+    unsafe { db.get_pinned_into_cf_opt(&cf, b"key", &readopts, &mut slice) }.unwrap();
     assert_eq!(slice.value(), b"value");
 
     // Reset releases the value; the slice stays usable.
     slice.reset();
     assert_eq!(slice.value(), b"");
 
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"key", &readopts, &mut slice)
+    let value = unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"key", &readopts, &mut slice) } }
         .unwrap();
     assert_eq!(value, Some(b"value".as_ref()));
 }
@@ -128,8 +123,8 @@ fn empty_value_roundtrips() {
     let mut slice = ReusablePinnableSlice::new();
 
     // An empty stored value is found (Some), distinct from a miss (None).
-    let value = db
-        .get_pinned_into_cf_opt(&cf, b"empty", &readopts, &mut slice)
-        .unwrap();
+    let value =
+        unsafe { unsafe { db.get_pinned_into_cf_opt(&cf, b"empty", &readopts, &mut slice) } }
+            .unwrap();
     assert_eq!(value, Some(b"".as_ref()));
 }

@@ -33,10 +33,9 @@ use crate::ffi_util::CSlice;
 use crate::{
     ColumnFamily, ColumnFamilyDescriptor, CompactOptions, DBIteratorWithThreadMode,
     DBPinnableBatch, DBPinnableSlice, DBRawIteratorWithThreadMode, DBWALIterator,
-    ReusablePinnableBatch,
     DEFAULT_COLUMN_FAMILY_NAME, Direction, Error, FlushOptions, IngestExternalFileOptions,
-    IteratorMode, Options, ReadOptions, ReusablePinnableSlice, SnapshotWithThreadMode,
-    WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
+    IteratorMode, Options, ReadOptions, ReusablePinnableBatch, ReusablePinnableSlice,
+    SnapshotWithThreadMode, WaitForCompactOptions, WriteBatch, WriteBatchWithIndex, WriteOptions,
     column_family::{AsColumnFamilyRef, BoundColumnFamily, UnboundColumnFamily},
     db_options::{ImportColumnFamilyOptions, OptionsMustOutliveDB},
     ffi,
@@ -1377,9 +1376,20 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// The slice is reset and refilled; on a hit the value is returned as a
     /// borrow of both the slice and this DB, so it must be released before
     /// the next fill. Returns `Ok(None)` when the key does not exist (the
-    /// slice is left empty). See [`ReusablePinnableSlice`] for the slice's
-    /// lifetime contract.
-    pub fn get_pinned_into_cf_opt<'a, K: AsRef<[u8]>>(
+    /// slice is left empty).
+    ///
+    /// # Safety
+    ///
+    /// On a hit the filled slice may hold a block-cache pin of this DB, and
+    /// the slice deliberately carries no DB lifetime so it can live in
+    /// long-lived state next to an owning handle (e.g. `Arc<DB>`). The
+    /// borrow checker therefore cannot see the obligation this call creates:
+    /// the caller must ensure the slice is [`reset`] or dropped before this
+    /// DB is dropped (closed). Resetting or dropping a slice that outlived
+    /// its DB runs cache-release callbacks into freed memory.
+    ///
+    /// [`reset`]: ReusablePinnableSlice::reset
+    pub unsafe fn get_pinned_into_cf_opt<'a, K: AsRef<[u8]>>(
         &'a self,
         cf: &impl AsColumnFamilyRef,
         key: K,
@@ -2106,9 +2116,20 @@ impl<T: ThreadMode, D: DBInner> DBCommon<T, D> {
     /// Results stay in input order, including duplicates; read them back with
     /// [`ReusablePinnableBatch::get`] or [`ReusablePinnableBatch::iter`]. Set
     /// `sorted_input` only when the keys are sorted according to the column
-    /// family's comparator. On error the batch is left reset (empty). See
-    /// [`ReusablePinnableBatch`] for the batch's lifetime contract.
-    pub fn batched_multi_get_pinned_into_cf_opt<K: AsRef<[u8]>>(
+    /// family's comparator. On error the batch is left reset (empty).
+    ///
+    /// # Safety
+    ///
+    /// The filled batch may hold block-cache pins of this DB, and the batch
+    /// deliberately carries no DB lifetime so it can live in long-lived state
+    /// next to an owning handle (e.g. `Arc<DB>`). The borrow checker
+    /// therefore cannot see the obligation this call creates: the caller must
+    /// ensure the batch is [`reset`] or dropped before this DB is dropped
+    /// (closed). Resetting or dropping a batch that outlived its DB runs
+    /// cache-release callbacks into freed memory.
+    ///
+    /// [`reset`]: ReusablePinnableBatch::reset
+    pub unsafe fn batched_multi_get_pinned_into_cf_opt<K: AsRef<[u8]>>(
         &self,
         cf: &impl AsColumnFamilyRef,
         keys: &[K],

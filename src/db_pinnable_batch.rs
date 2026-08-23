@@ -176,14 +176,15 @@ unsafe fn get_entry<'b>(
 /// checker guarantees the previous fill's values are released before the
 /// next fill.
 ///
-/// # Lifetime contract
+/// # Safety contract
 ///
 /// The batch carries no DB lifetime, so it can live in long-lived state next
-/// to an owning handle (e.g. `Arc<DB>`). In exchange the caller must uphold:
-/// a filled batch may pin block-cache handles of the DB it was last filled
-/// from, so it must be [`reset`](Self::reset) or dropped before that DB is
-/// closed, and holding a filled batch keeps that cache memory pinned until
-/// then.
+/// to an owning handle (e.g. `Arc<DB>`). In exchange, filling it
+/// ([`batched_multi_get_pinned_into_cf_opt`]) is `unsafe`: a filled batch may
+/// pin block-cache handles of the DB it was last filled from, so the caller
+/// must [`reset`](Self::reset) or drop it before that DB is closed — the
+/// borrow checker cannot enforce this. Holding a filled batch keeps that
+/// cache memory pinned until then.
 ///
 /// [`batched_multi_get_pinned_into_cf_opt`]: crate::DB::batched_multi_get_pinned_into_cf_opt
 pub struct ReusablePinnableBatch {
