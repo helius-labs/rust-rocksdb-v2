@@ -106,3 +106,20 @@ fn test_perf_context_extension_metrics() {
 
     set_perf_stats(PerfStatsLevel::Disable);
 }
+
+#[test]
+fn test_perf_metric_all_is_complete() {
+    assert_eq!(PerfMetric::ALL.len(), 120);
+    assert!(!PerfMetric::ALL.contains(&PerfMetric::TotalMetricCount));
+
+    let mut seen = std::collections::HashSet::new();
+    for metric in PerfMetric::ALL {
+        assert!(seen.insert(*metric as u32), "duplicate metric {metric:?}");
+    }
+
+    let ctx = PerfContext::default();
+    for metric in PerfMetric::ALL {
+        let _ = ctx.metric(*metric);
+        assert!(!metric.name().is_empty());
+    }
+}

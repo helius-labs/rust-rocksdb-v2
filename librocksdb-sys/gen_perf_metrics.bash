@@ -84,3 +84,21 @@ if (/enum\s*\{[^}]*rocksdb_user_key_comparison_count[^}]*\}/sm
 echo "        }"
 echo "    }"
 echo "}"
+echo ""
+echo "impl PerfMetric {"
+echo "    /// Every metric except the \`TotalMetricCount\` sentinel, in discriminant order."
+echo "    pub const ALL: &[PerfMetric] = &["
+perl -n0e '
+if (/enum\s*\{[^}]*rocksdb_user_key_comparison_count[^}]*\}/sm
+    || /enum\s*\{[^}]*rust_rocksdb_\w+\s*=\s*1024[^}]*\}/sm) {
+    $enum_block = $&;
+    while ($enum_block =~ /(?:rust_)?rocksdb_(\w+)(?:\s*=\s*\d+)?\s*,?/g) {
+        $metric = $1;
+        next if $metric eq "total_metric_count";
+        $name = $metric;
+        $name =~ s/(^|_)(\w)/\U$2/g;
+        print "        PerfMetric::$name,\n";
+    }
+}' $CHeaderFile $ExtHeaderFile
+echo "    ];"
+echo "}"
